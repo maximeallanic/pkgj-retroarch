@@ -118,8 +118,18 @@ int pkgi_text_height(const char* text);
 class Downloader;
 struct DbItem;
 
+enum class PspInstallMode
+{
+    Auto,
+    Iso,
+    LiveAreaPbp,
+};
+
 void pkgi_create_psp_rif(std::string contentid, uint8_t* rif);
 
-void pkgi_start_download(Downloader& downloader, const DbItem& item);
+void pkgi_start_download(
+        Downloader& downloader,
+        const DbItem& item,
+        PspInstallMode psp_install_mode = PspInstallMode::Auto);
 
 bool pkgi_is_module_present(const char* module_name);

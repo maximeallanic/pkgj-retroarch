@@ -73,7 +73,7 @@ void pkgi_process_pbp(std::string eboot_pbp, std::string disc_id) {
             // check magic is PBP magic
             if(memcmp(pbp_hdr.magic, "\0PBP", sizeof(pbp_hdr.magic)) == 0){
                 sceIoLseek(fd, pbp_hdr.data_psar, SCE_SEEK_SET);
-                LOGF("pbp_hdr magic is \"\\0PBP\"");
+                LOGF("Valid PBP header magic found");
                 
                 // check DATA.PSAR is atleast 8 bytes long
                 char magic[0x8];
@@ -82,7 +82,7 @@ void pkgi_process_pbp(std::string eboot_pbp, std::string disc_id) {
                     
                     // check is psx game
                     if(memcmp(magic, "PSISOIMG", sizeof(magic)) == 0 || memcmp(magic, "PSTITLEI", sizeof(magic)) == 0) {
-                        LOGF("data.psar magic is {}", std::string(magic, 8));
+                        LOGF("PSAR magic: {}", std::string(magic, 8));
                         
                         // check data.psp size is atleast the data.psp self header
                         np_data_psp data_psp;
@@ -94,7 +94,7 @@ void pkgi_process_pbp(std::string eboot_pbp, std::string disc_id) {
                             if(cid_sz == 36) {
                                 std::string title_id = std::string(data_psp.content_id + 7, 9);
                                 pkgi_psx_add_installed_game(title_id, disc_id);
-                                LOGF("Inserting {} = {}", title_id, disc_id);
+                                LOGF("Mapped PSX title ID {} to disc ID {}", title_id, disc_id);
                             }
                         }
                     }
@@ -115,8 +115,7 @@ void pkgi_scan_pbps() {
     std::string eboot_file;
     
     int dir_read_ret = 0;
-    SceIoDirent dir;
-    int ret = 0;
+    SceIoDirent dir;    
     do{
         memset(&dir, 0x00, sizeof(SceIoDirent));
         dir_read_ret = sceIoDread(dfd, &dir);    
@@ -125,7 +124,7 @@ void pkgi_scan_pbps() {
         std::string eboot_file = fmt::format("{}/{}/EBOOT.PBP", parent_folder, disc_id);
         pkgi_process_pbp(eboot_file, disc_id);
         
-        LOGF("checking {} .", eboot_file);
+        LOGF("Scanning PSX game folder: {}", eboot_file);
         
     } while(dir_read_ret > 0);
     

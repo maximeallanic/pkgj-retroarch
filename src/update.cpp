@@ -18,7 +18,7 @@ void start_download()
 {
     try
     {
-        LOGF("starting downloading version {}", version);
+        LOGF("Downloading PKGj update v{}", version);
 
         const auto filename = fmt::format(
                 "{}/pkgj-v{}.vpk", pkgi_get_config_folder(), version);
@@ -46,11 +46,11 @@ void start_download()
                 pkgi_write(file, data.data(), read);
             }
 
-            LOGF("update download complete");
+            LOGF("PKGj update downloaded successfully");
         }
         catch (...)
         {
-            LOGF("download failed, removing partial file");
+            LOGF("PKGj update download failed, removing partial file");
             pkgi_rm(filename.c_str());
             throw;
         }
@@ -81,7 +81,7 @@ void update_thread()
             pkgi_sleep(20);
         }
 
-        LOGF("checking latest pkgi version at {}", PKGJ_UPDATE_URL_VERSION);
+        LOGF("Checking for updates at: {}", PKGJ_UPDATE_URL_VERSION);
 
         VitaHttp http;
         http.start(PKGJ_UPDATE_URL_VERSION, 0);
@@ -90,11 +90,11 @@ void update_thread()
                 http.read(last_versionb.data(), last_versionb.size()));
         std::string last_version(last_versionb.begin(), last_versionb.end());
 
-        LOGF("last version is {}", last_version);
+        LOGF("Latest available version: {}", last_version);
 
         if (last_version != PKGI_VERSION)
         {
-            LOG("new version available");
+            LOG("New PKGj version available: %s", last_version.c_str());
 
             version = last_version;
 
@@ -114,7 +114,7 @@ void update_thread()
     }
     catch (const std::exception& e)
     {
-        LOGF("error in update thread: {}", e.what());
+        LOGF("Update check failed: {}", e.what());
     }
 }
 }

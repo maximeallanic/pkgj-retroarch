@@ -1,5 +1,7 @@
 #include "config.hpp"
 
+#include <cstdlib>
+
 #include <fmt/format.h>
 
 #include "file.hpp"
@@ -169,6 +171,7 @@ Config pkgi_load_config()
     try
     {
         Config config{};
+        config.no_version_check = 1;  // fork: update URL points to upstream
 
         config.games_url = default_psv_games_url;
         config.dlcs_url = default_psv_dlcs_url;
@@ -179,6 +182,9 @@ Config pkgi_load_config()
         config.psp_games_url = default_psp_games_url;
         config.psp_dlcs_url = default_psp_dlcs_url;
         config.comppack_url = default_comppack_url;
+        config.thumbnail_url = "";
+        config.thumbnail_folder = "";
+        config.thumbnail_size = 2;
         config.sort = SortByName;
         config.order = SortAscending;
         config.filter = DbFilterAll;
@@ -186,7 +192,7 @@ Config pkgi_load_config()
 
         auto const path =
                 fmt::format("{}/config.txt", pkgi_get_config_folder());
-        LOGF("config location: {}", path);
+        LOGF("Config file path: {}", path);
 
         if (!pkgi_file_exists(path))
             return config;
@@ -194,7 +200,7 @@ Config pkgi_load_config()
         auto data = pkgi_load(path);
         data.push_back('\n');
 
-        LOG("config.txt loaded, parsing");
+        LOG("Parsing config.txt");
         auto text = reinterpret_cast<char*>(data.data());
         const auto end = text + data.size();
 
@@ -241,6 +247,13 @@ Config pkgi_load_config()
                 config.psp_dlcs_url = value;
             else if (pkgi_stricmp(key, "url_comppack") == 0)
                 config.comppack_url = value;
+            else if (pkgi_stricmp(key, "thumbnail_url") == 0)
+                config.thumbnail_url = value;
+            else if (pkgi_stricmp(key, "thumbnail_folder") == 0)
+                config.thumbnail_folder = value;
+            else if (pkgi_stricmp(key, "thumbnail_size") == 0)
+                config.thumbnail_size = static_cast<int>(
+                        std::strtol(value, nullptr, 10));
             else if (pkgi_stricmp(key, "sort") == 0)
                 config.sort = parse_sort(value, SortByName);
             else if (pkgi_stricmp(key, "order") == 0)
@@ -249,8 +262,6 @@ Config pkgi_load_config()
                 config.filter = parse_filter(value, DbFilterAll);
             else if (pkgi_stricmp(key, "no_version_check") == 0)
                 config.no_version_check = 1;
-            else if (pkgi_stricmp(key, "install_psp_as_pbp") == 0)
-                config.install_psp_as_pbp = 1;
             else if (pkgi_stricmp(key, "install_psp_psx_location") == 0)
                 config.install_psp_psx_location = value;
         }
@@ -314,6 +325,23 @@ void pkgi_save_config(const Config& config)
     SAVE_CONF("url_psp_dlcs", psp_dlcs_url, default_psp_dlcs_url)
     SAVE_CONF("url_comppack", comppack_url, default_comppack_url)
 #undef SAVE_CONF
+    if (!config.thumbnail_url.empty())
+        len += pkgi_snprintf(
+                data + len,
+                sizeof(data) - len,
+                "thumbnail_url %s\n",
+                config.thumbnail_url.c_str());
+    if (!config.thumbnail_folder.empty())
+        len += pkgi_snprintf(
+                data + len,
+                sizeof(data) - len,
+                "thumbnail_folder %s\n",
+                config.thumbnail_folder.c_str());
+    len += pkgi_snprintf(
+            data + len,
+            sizeof(data) - len,
+            "thumbnail_size %d\n",
+            config.thumbnail_size);
     if (!config.install_psp_psx_location.empty())
         len += pkgi_snprintf(
                 data + len,
@@ -355,12 +383,6 @@ void pkgi_save_config(const Config& config)
     {
         len += pkgi_snprintf(
                 data + len, sizeof(data) - len, "no_version_check 1\n");
-    }
-
-    if (config.install_psp_as_pbp)
-    {
-        len += pkgi_snprintf(
-                data + len, sizeof(data) - len, "install_psp_as_pbp 1\n");
     }
 
     pkgi_save(
