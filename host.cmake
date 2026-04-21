@@ -52,6 +52,7 @@ if(BUILD_SIM)
     src/comppackdb.cpp
     src/config.cpp
     src/configeditor.cpp
+    src/customhandler.cpp
     src/db.cpp
     src/dialog.cpp
     src/download.cpp
@@ -59,6 +60,7 @@ if(BUILD_SIM)
     src/extractzip.cpp
     src/filedownload.cpp
     src/filehttp.cpp
+    src/browserview.cpp
     src/gameview.cpp
     src/imagefetcher.cpp
     src/curlhttp.cpp

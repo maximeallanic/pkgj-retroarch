@@ -9,6 +9,7 @@ extern "C"
 #include "comppackdb.hpp"
 #include "config.hpp"
 #include "configeditor.hpp"
+#include "customhandler.hpp"
 #include "db.hpp"
 #include "dialog.hpp"
 #include "download.hpp"
@@ -18,6 +19,7 @@ extern "C"
 #include "install.hpp"
 #include "logviewer.hpp"
 #include "menu.hpp"
+#include "browserview.hpp"
 #include "update.hpp"
 #include "utils.hpp"
 #include "vitahttp.hpp"
@@ -59,10 +61,11 @@ typedef enum
 {
     StateError,
     StateRefreshing,
+    StateBrowse,
     StateMain,
 } State;
 
-State state = StateMain;
+State state = StateBrowse;
 Mode mode = ModeGames;
 
 uint32_t first_item;
@@ -95,6 +98,7 @@ std::set<std::string> installed_themes;
 std::unique_ptr<GameView> gameview;
 std::unique_ptr<ConfigEditor> config_editor;
 std::unique_ptr<LogViewer> log_viewer;
+std::unique_ptr<BrowseView> browse_view;
 std::unique_ptr<AnnotationDatabase> annotation_db;
 bool need_refresh = true;
 bool runtime_install_queued = false;
@@ -1180,8 +1184,7 @@ void pkgi_create_psp_rif([[maybe_unused]] std::string contentid,
     memset(&license, 0x00, sizeof(SceNpDrmLicense));
     license.account_id = 0x0123456789ABCDEFLL;
     memset(license.ecdsa_signature, 0xFF, 0x28);
-    strncpy(license.content_id, contentid.c_str(), 0x30);
-
+    snprintf(license.content_id, sizeof(license.content_id), "%s", contentid.c_str());
     memcpy(rif, &license, PKGI_PSP_RIF_SIZE);
 #endif // PKGI_SIMULATOR
 }
@@ -1338,6 +1341,26 @@ int main()
 
         pkgi_open_db();
 
+        browse_view = std::make_unique<BrowseView>(
+        config,
+                [](const BrowseNode& node)
+                {
+                    if (node.mode.has_value())
+                    {
+                        // Future: use node.group_filter to pre-filter the game
+                        // list by initial letter group (e.g. "A-D").
+                        pkgi_set_mode(*node.mode);
+                        state = StateMain;
+                        return;
+                    }
+
+                    if (!node.custom_tsv_url.empty())
+                    {
+                        pkgi_custom_open_list_template(
+                                node.label, node.custom_tsv_url);
+                    }
+                });
+
         annotation_db = std::make_unique<AnnotationDatabase>(
                 std::string(pkgi_get_config_folder()) + "/annotations.db");
         pkgi_apply_annotations();
@@ -1473,7 +1496,10 @@ int main()
 
             pkgi_draw_texture(background, 0, 0);
 
-            pkgi_do_head();
+            // Browse view renders its own header/footer; skip pkgi_do_head()
+            // in that state to avoid a conflicting title bar.
+            if (state != StateBrowse)
+                pkgi_do_head();
             switch (state)
             {
             case StateError:
@@ -1484,15 +1510,35 @@ int main()
                 pkgi_do_refresh();
                 break;
 
+            case StateBrowse:
+                // At the root of the browse tree, Back does nothing.
+                browse_view->update(input);
+                browse_view->render();
+                // Consume all input so menu / overlays do not react this frame.
+                input.active  = 0;
+                input.pressed = 0;
+                break;
+
             case StateMain:
                 pkgi_do_main(
                         downloader,
                         pkgi_dialog_is_open() || pkgi_menu_is_open() ? NULL
                                                                      : &input);
+                // Allow returning to the category tree with the cancel button
+                // when no overlay is active.
+                if (!pkgi_overlay_is_open() && !pkgi_dialog_is_open() &&
+                        !pkgi_menu_is_open() &&
+                        (input.pressed & pkgi_cancel_button()))
+                {
+                    state = StateBrowse;
+                    input.pressed &= ~pkgi_cancel_button();
+                }
                 break;
             }
 
-            pkgi_do_tail(downloader);
+            // Browse view draws its own footer; skip the game-list tail.
+            if (state != StateBrowse)
+                pkgi_do_tail(downloader);
 
             if (gameview)
             {
@@ -1600,6 +1646,9 @@ int main()
                         break;
                     case MenuResultRefresh:
                         pkgi_refresh_list();
+                        break;
+                    case MenuResultBackToBrowse:
+                        state = StateBrowse;
                         break;
                     case MenuResultShowGames:
                         pkgi_set_mode(ModeGames);

@@ -2,7 +2,14 @@
 
 #include "db.hpp"
 
+#include <array>
 #include <string>
+
+struct CustomConfigEntry
+{
+    std::string name;
+    std::string url;
+};
 
 typedef struct Config
 {
@@ -33,6 +40,8 @@ typedef struct Config
     std::string thumbnail_url;
     std::string thumbnail_folder;
     int thumbnail_size{2};
+
+    std::array<CustomConfigEntry, 5> custom_entries;
 } Config;
 
 Config pkgi_load_config();

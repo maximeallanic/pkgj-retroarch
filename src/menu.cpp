@@ -28,6 +28,7 @@ typedef enum
     MenuRefresh,
     MenuConfigEdit,
     MenuLogView,
+    MenuBack,
     MenuShow,
 } MenuType;
 
@@ -60,14 +61,7 @@ static const MenuEntry menu_entries[] = {
         {MenuConfigEdit, "Edit config.txt", 0},
         {MenuLogView, "Log viewer", 0},
 
-        {MenuShow, "Show games", 1},
-        {MenuShow, "Show DLCs", 2},
-        {MenuShow, "Show demos", 64},
-        {MenuShow, "Show themes", 32},
-        {MenuShow, "Show PS1 games", 4},
-        {MenuShow, "Show PSP games", 8},
-        {MenuShow, "Show PSP DLCs", 128},
-        {MenuShow, "Show PSM games", 16},
+        {MenuBack, "Back to categories", 0},
 };
 
 int pkgi_menu_is_open(void)
@@ -209,36 +203,9 @@ int pkgi_do_menu(pkgi_input* input)
             menu_delta = -1;
             return 1;
         }
-        else if (type == MenuShow)
+        else if (type == MenuBack)
         {
-            switch (menu_entries[menu_selected].value)
-            {
-            case 1:
-                menu_result = MenuResultShowGames;
-                break;
-            case 2:
-                menu_result = MenuResultShowDlcs;
-                break;
-            case 4:
-                menu_result = MenuResultShowPsxGames;
-                break;
-            case 8:
-                menu_result = MenuResultShowPspGames;
-                break;
-            case 16:
-                menu_result = MenuResultShowPsmGames;
-                break;
-            case 32:
-                menu_result = MenuResultShowThemes;
-                break;
-            case 64:
-                menu_result = MenuResultShowDemos;
-                break;
-            case 128:
-                menu_result = MenuResultShowPspDlcs;
-                break;
-            }
-
+            menu_result = MenuResultBackToBrowse;
             menu_delta = -1;
             return 1;
         }
@@ -301,7 +268,7 @@ int pkgi_do_menu(pkgi_input* input)
         char text[64];
         if (type == MenuSearch || type == MenuSearchClear || type == MenuText ||
             type == MenuRefresh || type == MenuConfigEdit || type == MenuLogView ||
-            type == MenuShow)
+            type == MenuBack || type == MenuShow)
         {
             pkgi_strncpy(text, sizeof(text), entry->text);
         }

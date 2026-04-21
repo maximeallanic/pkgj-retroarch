@@ -31,8 +31,8 @@ std::string pkgi_pbp_read_disc_id(std::string eboot_pbp) {
     // check can open eboot file at all
     if(fd >= 0) {
         // check file is atleast size of pbp header
-        int read_sz = sceIoRead(fd, &pbp_hdr, sizeof(pbp_header));
-        if(read_sz >= sizeof(pbp_header)) {
+        SceSSize read_sz = sceIoRead(fd, &pbp_hdr, sizeof(pbp_header));
+        if(read_sz >= static_cast<SceSSize>(sizeof(pbp_header))) {
             // check magic is PBP magic
             if(memcmp(pbp_hdr.magic, "\0PBP", sizeof(pbp_hdr.magic)) == 0){
                 // check the param.sfo length is valid
@@ -45,7 +45,7 @@ std::string pkgi_pbp_read_disc_id(std::string eboot_pbp) {
                     read_sz = sceIoRead(fd, sfo, sfo_sz);
                     
                     // check read size is actually the size of the sfo
-                    if(read_sz >= sfo_sz) {
+                    if(read_sz >= 0 && static_cast<size_t>(read_sz) >= sfo_sz) {
                         disc_id = pkgi_sfo_get_string(sfo, sfo_sz, "DISC_ID");
                     }
                     
@@ -68,8 +68,8 @@ void pkgi_process_pbp(std::string eboot_pbp, std::string disc_id) {
     // check can open eboot file at all
     if(fd >= 0) {
         // check file is atleast size of pbp header
-        int read_sz = sceIoRead(fd, &pbp_hdr, sizeof(pbp_header));
-        if(read_sz >= sizeof(pbp_header)) {
+        SceSSize read_sz = sceIoRead(fd, &pbp_hdr, sizeof(pbp_header));
+        if(read_sz >= static_cast<SceSSize>(sizeof(pbp_header))) {
             // check magic is PBP magic
             if(memcmp(pbp_hdr.magic, "\0PBP", sizeof(pbp_hdr.magic)) == 0){
                 sceIoLseek(fd, pbp_hdr.data_psar, SCE_SEEK_SET);
@@ -78,7 +78,7 @@ void pkgi_process_pbp(std::string eboot_pbp, std::string disc_id) {
                 // check DATA.PSAR is atleast 8 bytes long
                 char magic[0x8];
                 read_sz = sceIoRead(fd, magic, sizeof(magic));
-                if(read_sz >= sizeof(magic)) {
+                if(read_sz >= static_cast<SceSSize>(sizeof(magic))) {
                     
                     // check is psx game
                     if(memcmp(magic, "PSISOIMG", sizeof(magic)) == 0 || memcmp(magic, "PSTITLEI", sizeof(magic)) == 0) {
@@ -88,7 +88,7 @@ void pkgi_process_pbp(std::string eboot_pbp, std::string disc_id) {
                         np_data_psp data_psp;
                         sceIoLseek(fd, pbp_hdr.data_psp, SCE_SEEK_SET);
                         read_sz = sceIoRead(fd, &data_psp, sizeof(np_data_psp));
-                        if(read_sz >= sizeof(np_data_psp)) {
+                        if(read_sz >= static_cast<SceSSize>(sizeof(np_data_psp))) {
                             // check the content id is the correct length
                             int cid_sz = strnlen(data_psp.content_id, 40);
                             if(cid_sz == 36) {

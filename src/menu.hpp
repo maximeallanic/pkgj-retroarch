@@ -11,6 +11,7 @@ typedef enum
     MenuResultAccept,
     MenuResultCancel,
     MenuResultRefresh,
+    MenuResultBackToBrowse,
     MenuResultShowGames,
     MenuResultShowDlcs,
     MenuResultShowDemos,

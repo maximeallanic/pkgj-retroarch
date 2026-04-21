@@ -57,11 +57,13 @@ add_executable(pkgj
   src/comppackdb.cpp
   src/config.cpp
   src/db.cpp
+  src/customhandler.cpp
   src/dialog.cpp
   src/download.cpp
   src/downloader.cpp
   src/extractzip.cpp
   src/filedownload.cpp
+  src/browserview.cpp
   src/gameview.cpp
   src/logbuffer.cpp
   src/logviewer.cpp

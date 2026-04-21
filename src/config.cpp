@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 
+#include <algorithm>
+
 #include <fmt/format.h>
 
 #include "file.hpp"
@@ -166,6 +168,73 @@ static DbFilter parse_filter(char* value, uint32_t filter)
     return static_cast<DbFilter>(result);
 }
 
+static int parse_custom_index(const char* key)
+{
+    if (pkgi_stricmp(key, "custom1") == 0)
+        return 0;
+    if (pkgi_stricmp(key, "custom2") == 0)
+        return 1;
+    if (pkgi_stricmp(key, "custom3") == 0)
+        return 2;
+    if (pkgi_stricmp(key, "custom4") == 0)
+        return 3;
+    if (pkgi_stricmp(key, "custom5") == 0)
+        return 4;
+    return -1;
+}
+
+static char* skipline(char* text, char* end)
+{
+    while (text < end && *text != '\n' && *text != '\r')
+        text++;
+    while (text < end && (*text == '\n' || *text == '\r'))
+        text++;
+    return text;
+}
+
+static void parse_custom_entry(
+        char* value,
+        char* end,
+        CustomConfigEntry* entry)
+{
+    entry->name.clear();
+    entry->url.clear();
+
+    value = skipws(value, end);
+    if (value == end || *value != '"')
+        return;
+
+    ++value;
+    char* name_start = value;
+    while (value < end && *value != '"' && *value != '\n' && *value != '\r')
+        value++;
+    if (value == end || *value != '"')
+        return;
+
+    *value++ = 0;
+    entry->name = name_start;
+
+    value = skipws(value, end);
+    if (value == end || *value == '\n' || *value == '\r')
+    {
+        entry->name.clear();
+        return;
+    }
+
+    char* url_start = value;
+    while (value < end && *value != '\n' && *value != '\r')
+        value++;
+
+    char* url_end = value;
+    while (url_end > url_start && (url_end[-1] == ' ' || url_end[-1] == '\t'))
+        --url_end;
+    *url_end = 0;
+
+    entry->url = url_start;
+    if (entry->url.empty())
+        entry->name.clear();
+}
+
 Config pkgi_load_config()
 {
     try
@@ -217,6 +286,18 @@ Config pkgi_load_config()
             text = skipws(text, end);
             if (text == end)
                 break;
+
+            const int custom_index = parse_custom_index(key);
+            if (custom_index >= 0)
+            {
+                char* line_end = text;
+                while (line_end < end && *line_end != '\n' && *line_end != '\r')
+                    line_end++;
+                parse_custom_entry(
+                        text, line_end, &config.custom_entries[custom_index]);
+                text = skipline(line_end, end);
+                continue;
+            }
 
             const auto value = text;
 
@@ -325,6 +406,19 @@ void pkgi_save_config(const Config& config)
     SAVE_CONF("url_psp_dlcs", psp_dlcs_url, default_psp_dlcs_url)
     SAVE_CONF("url_comppack", comppack_url, default_comppack_url)
 #undef SAVE_CONF
+    for (size_t i = 0; i < config.custom_entries.size(); i++)
+    {
+        const auto& entry = config.custom_entries[i];
+        if (entry.name.empty() || entry.url.empty())
+            continue;
+        len += pkgi_snprintf(
+                data + len,
+                sizeof(data) - len,
+                "custom%u \"%s\" %s\n",
+                static_cast<unsigned>(i + 1),
+                entry.name.c_str(),
+                entry.url.c_str());
+    }
     if (!config.thumbnail_url.empty())
         len += pkgi_snprintf(
                 data + len,
