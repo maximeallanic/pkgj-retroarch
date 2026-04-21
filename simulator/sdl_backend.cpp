@@ -30,6 +30,7 @@ extern "C"
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <mutex>
@@ -128,7 +129,15 @@ static uint32_t sdl_key_to_button(SDL_Keycode k)
 // Font helpers
 // ──────────────────────────────────────────────────────────────────────────────
 // Preferred font search order (first that exists is used).
+// Include Japanese-capable fonts first so the simulator can render JPN text.
 static const char* FONT_CANDIDATES[] = {
+    "/usr/share/fonts/truetype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJKjp-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.ttf",
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",
+    "/usr/share/fonts/truetype/vlgothic/VL-Gothic-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
@@ -139,20 +148,57 @@ static const char* FONT_CANDIDATES[] = {
     nullptr
 };
 
-static TTF_Font* load_best_font(int ptsize)
+static bool load_font_file(const char* path, int ptsize, TTF_Font** out)
 {
-    for (int i = 0; FONT_CANDIDATES[i]; ++i)
+    if (access(path, R_OK) != 0)
+        return false;
+    TTF_Font* font = TTF_OpenFont(path, ptsize);
+    if (!font)
+        return false;
+
+    printf("[sim] Loaded font: %s\n", path);
+    *out = font;
+    return true;
+}
+
+static bool load_font_via_fc_match(int ptsize, TTF_Font** out)
+{
+    FILE* pipe = popen("fc-match -s -f '%{file}\\n' :lang=ja", "r");
+    if (!pipe)
+        return false;
+
+    char path[1024];
+    while (fgets(path, sizeof(path), pipe))
     {
-        if (access(FONT_CANDIDATES[i], R_OK) == 0)
+        size_t len = strlen(path);
+        if (len == 0)
+            continue;
+        if (path[len - 1] == '\n')
+            path[len - 1] = '\0';
+
+        if (load_font_file(path, ptsize, out))
         {
-            TTF_Font* f = TTF_OpenFont(FONT_CANDIDATES[i], ptsize);
-            if (f)
-            {
-                printf("[sim] Loaded font: %s\n", FONT_CANDIDATES[i]);
-                return f;
-            }
+            pclose(pipe);
+            return true;
         }
     }
+
+    pclose(pipe);
+    return false;
+}
+
+static TTF_Font* load_best_font(int ptsize)
+{
+    TTF_Font* font = nullptr;
+    if (load_font_via_fc_match(ptsize, &font))
+        return font;
+
+    for (int i = 0; FONT_CANDIDATES[i]; ++i)
+    {
+        if (load_font_file(FONT_CANDIDATES[i], ptsize, &font))
+            return font;
+    }
+
     // fall back to whatever TTF_OpenFont can find
     fprintf(stderr, "[sim] WARNING: no preferred font found; text will be blank\n");
     return nullptr;

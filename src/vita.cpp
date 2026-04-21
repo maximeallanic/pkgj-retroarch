@@ -194,6 +194,24 @@ int pkgi_is_korean_char(const unsigned int c)
     return 0;
 }
 
+int pkgi_is_japanese_char(const unsigned int c)
+{
+    unsigned short ch = c;
+    // hiragana block
+    if (0x3040 <= ch && ch <= 0x309f)
+        return 1;
+    // katakana block
+    if (0x30a0 <= ch && ch <= 0x30ff)
+        return 1;
+    // punctuation / fullwidth forms commonly used in Japanese text
+    if (0xff00 <= ch && ch <= 0xffef)
+        return 1;
+    // CJK unified ideographs
+    if (0x4e00 <= ch && ch <= 0x9fff)
+        return 1;
+    return 0;
+}
+
 int pkgi_is_latin_char(const unsigned int c)
 {
     unsigned short ch = c;
@@ -583,7 +601,8 @@ void pkgi_start(void)
     }
 
     vita2d_init_advanced(4 * 1024 * 1024);
-    vita2d_system_pgf_config pgf_confs[3] = {
+    vita2d_system_pgf_config pgf_confs[4] = {
+            {SCE_FONT_LANGUAGE_JAPANESE, pkgi_is_japanese_char},
             {SCE_FONT_LANGUAGE_KOREAN, pkgi_is_korean_char},
             {SCE_FONT_LANGUAGE_LATIN, pkgi_is_latin_char},
             {SCE_FONT_LANGUAGE_DEFAULT, NULL},
