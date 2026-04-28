@@ -406,7 +406,9 @@ void pkgi_draw_text_scale(int x, int y, uint32_t color, const char* text, float 
         static_cast<Uint8>(color & 0xFF),
         static_cast<Uint8>((color >> 8) & 0xFF),
         static_cast<Uint8>((color >> 16) & 0xFF),
-        255};
+        static_cast<Uint8>(color >> 24)};
+    if (c.a == 0)
+        c.a = 255;
 
     SDL_Surface* surf = TTF_RenderUTF8_Blended(g_font, text, c);
     if (!surf) return;

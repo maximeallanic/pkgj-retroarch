@@ -929,12 +929,11 @@ void pkgi_do_main(Downloader& downloader, pkgi_input* input)
         int h = static_cast<int>(pkgi_text_height("M") * scale);
         int text_top = (VITA_HEIGHT - h) / 2;
         int x = (VITA_WIDTH - w) / 2;
-        int y = text_top - 20;
-        if (y < 0)
-            y = 0;
+        int y = text_top;
         pkgi_draw_rect(x - 12, text_top - 12, w + 24, h + 24, PKGI_COLOR_MENU_BACKGROUND);
+        const uint32_t overlay_color = (0x33u << 24) | PKGI_COLOR_TEXT_HEAD;
         pkgi_draw_text_scale(
-                x, y, PKGI_COLOR_TEXT_HEAD, pkgi_group_overlay_text.c_str(), scale);
+                x, y, overlay_color, pkgi_group_overlay_text.c_str(), scale);
     }
 
     if (input && (input->pressed & pkgi_ok_button()))

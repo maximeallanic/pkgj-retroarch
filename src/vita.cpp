@@ -903,11 +903,19 @@ void pkgi_draw_text(int x, int y, uint32_t color, const char* text)
 
 void pkgi_draw_text_scale(int x, int y, uint32_t color, const char* text, float scale)
 {
+    uint8_t alpha = static_cast<uint8_t>(color >> 24);
+    if (alpha == 0)
+        alpha = 255;
+    uint32_t rgba = RGBA8(
+            static_cast<uint8_t>(color & 0xff),
+            static_cast<uint8_t>((color >> 8) & 0xff),
+            static_cast<uint8_t>((color >> 16) & 0xff),
+            alpha);
     vita2d_pgf_draw_text(
             g_font,
             x,
-            y + 20,
-            VITA_COLOR(color),
+            y + static_cast<int>(20.f * scale),
+            rgba,
             scale,
             text);
 }
