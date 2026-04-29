@@ -50,9 +50,6 @@ extern SDL_Texture* sim_create_font_texture(const uint32_t* px, int w, int h);
 #include <cstddef>
 #include <cstring>
 
-#define PKGI_UPDATE_URL \
-    "https://api.github.com/repos/blastrock/pkgj/releases/latest"
-
 namespace
 {
 // forward declaration — defined later in this anonymous namespace

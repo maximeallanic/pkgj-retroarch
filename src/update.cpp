@@ -207,6 +207,8 @@ void update_thread()
     catch (const std::exception& e)
     {
         LOGF("Update check failed: {}", e.what());
+        pkgi_dialog_error(
+                fmt::format("Update check failed: {}", e.what()).c_str());
     }
 }
 }
