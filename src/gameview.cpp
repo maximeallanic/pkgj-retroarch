@@ -371,11 +371,14 @@ void GameView::render()
 
     ImVec2 rc_screen_min = ImGui::GetCursorScreenPos();
 
+    ImGui::PushStyleVar(
+            ImGuiStyleVar_WindowPadding, ImVec2(4.f, 2.f));
     ImGui::BeginChild(
             "##rc",
             ImVec2(right_w, avail_h),
             false,
             (rc_active ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoNav));
+    ImGui::PopStyleVar();
 
     // Content width inside the child (accounts for padding / scrollbar)
     const float rc_w = ImGui::GetContentRegionAvail().x;
@@ -384,8 +387,8 @@ void GameView::render()
     if (is_vita_mode())
     {
         // ── Metadata rows ────────────────────────────────────────────────────
-        // Helper: label in dim text, value right-aligned at a fixed x offset.
-        const float label_x = 160.f;
+        // Helper: label in dim text, value at a fixed x offset.
+        const float label_x = 190.f;
         auto row = [&](const char* label,
                        const char* value,
                        ImVec4 col = ImVec4(-1.f, -1.f, -1.f, -1.f))
@@ -398,24 +401,52 @@ void GameView::render()
                 ImGui::Text("%s", value);
         };
 
-        row("Title ID:", _item->titleid.c_str());
-
         const auto sys_ver = pkgi_get_system_version();
         const auto min_ver = get_min_system_version();
         const bool fw_ok   = !min_ver.empty() && sys_ver >= min_ver;
 
-        row("Min firmware:",
-            min_ver.empty() ? "unknown" : min_ver.c_str());
-        row("System firmware:",
-            sys_ver.c_str(),
-            fw_ok ? ImVec4(0.3f, 1.f, 0.5f, 1.f)
-                  : ImVec4(1.f, 0.35f, 0.35f, 1.f));
+        // Single combined firmware line: "Required: X.XX (current: Y.YY)"
+        {
+            const std::string req_str =
+                    min_ver.empty() ? "unknown" : min_ver;
+            const std::string fw_line =
+                    fmt::format("{} (current: {})", req_str, sys_ver);
+            row("Required firmware:",
+                fw_line.c_str(),
+                fw_ok ? ImVec4(0.3f, 1.f, 0.5f, 1.f)
+                      : ImVec4(1.f, 0.35f, 0.35f, 1.f));
+        }
 
         const bool installed = !_game_version.empty();
-        row("Installed version:",
-            installed ? _game_version.c_str() : "not installed",
-            installed ? ImVec4(0.3f, 1.f, 0.5f, 1.f)
-                      : ImVec4(1.f, 0.88f, 0.25f, 1.f));
+
+        // Installed version + base compat pack on one line
+        {
+            ImGui::TextDisabled("Installed version:");
+            ImGui::SameLine(label_x);
+            if (installed)
+                ImGui::TextColored(
+                        ImVec4(0.3f, 1.f, 0.5f, 1.f),
+                        "%s",
+                        _game_version.c_str());
+            else
+                ImGui::TextColored(
+                        ImVec4(1.f, 0.88f, 0.25f, 1.f), "not installed");
+
+            // Base compat pack status on the same line if there is info
+            if (_comppack_versions.present ||
+                !_comppack_versions.base.empty())
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("  Base cp:");
+                ImGui::SameLine();
+                if (_comppack_versions.base.empty())
+                    ImGui::TextColored(
+                            ImVec4(1.f, 0.88f, 0.25f, 1.f), "no");
+                else
+                    ImGui::TextColored(
+                            ImVec4(0.3f, 1.f, 0.5f, 1.f), "yes");
+            }
+        }
 
         if (_comppack_versions.present &&
             _comppack_versions.base.empty() &&
@@ -425,12 +456,9 @@ void GameView::render()
                     ImVec4(1.f, 0.9f, 0.2f, 1.f),
                     "Compat pack: installed (unknown version)");
         }
-        else
+        else if (!_comppack_versions.patch.empty())
         {
-            row("Base compat pack:",
-                _comppack_versions.base.empty() ? "not installed" : "installed");
-            if (!_comppack_versions.patch.empty())
-                row("Patch compat pack:", _comppack_versions.patch.c_str());
+            row("Patch compat pack:", _comppack_versions.patch.c_str());
         }
 
         ImGui::Spacing();
@@ -443,14 +471,36 @@ void GameView::render()
                     DescriptionFetcher::Status::Found)
         {
             const auto desc = _description_fetcher->get_description();
-            ImGui::TextDisabled("Description");
+
+            // At Panel level: "Description" is a selectable — pressing X
+            // on it enters SubItem (scroll) mode.  At other levels it is a
+            // plain header.
+            const bool at_panel_right =
+                    (_focus_level == FocusLevel::Panel &&
+                     _focused_panel == FocusPanel::Right);
+            const bool desc_active =
+                    (_focus_level == FocusLevel::SubItem &&
+                     _focused_panel == FocusPanel::Right &&
+                     _subitem_target == SubItemTarget::Description);
+
+            if (at_panel_right)
+            {
+                if (ImGui::Selectable(
+                            "Description###desc_hdr", false,
+                            ImGuiSelectableFlags_None))
+                {
+                    _subitem_target = SubItemTarget::Description;
+                    _focus_level   = FocusLevel::SubItem;
+                    _request_focus = true;
+                }
+            }
+            else
+            {
+                ImGui::TextDisabled("Description");
+            }
             ImGui::Spacing();
 
             // Sub-item focus: let description scroll area receive ImGui nav
-            const bool desc_active =
-                    (_focus_level == FocusLevel::SubItem &&
-                     _focused_panel == FocusPanel::Right);
-
             if (_request_focus && desc_active)
             {
                 ImGui::SetNextWindowFocus();
@@ -468,16 +518,6 @@ void GameView::render()
             ImGui::PopTextWrapPos();
             ImGui::EndChild();
             ImGui::PopStyleColor();
-
-            // "Enter scroll" button — navigable in Panel level, enters SubItem
-            if (!desc_active)
-            {
-                if (ImGui::SmallButton("Scroll description ###descscroll"))
-                {
-                    _focus_level   = FocusLevel::SubItem;
-                    _request_focus = true;
-                }
-            }
 
             ImGui::Spacing();
             ImGui::Separator();
@@ -640,11 +680,58 @@ void GameView::render()
         }
 
         ImGui::Spacing();
-        ImGui::Text("Comment:");
-        ImGui::TextWrapped(
-                "%s",
-                _annotation.comment.empty() ? "(no comment)"
-                                            : _annotation.comment.c_str());
+
+        // Comment field: shown as a scrollable blue box, like description.
+        // At Panel level: "Comment" header is a selectable to enter scroll.
+        {
+            const bool at_panel_right =
+                    (_focus_level == FocusLevel::Panel &&
+                     _focused_panel == FocusPanel::Right);
+            const bool comment_active =
+                    (_focus_level == FocusLevel::SubItem &&
+                     _focused_panel == FocusPanel::Right &&
+                     _subitem_target == SubItemTarget::Comment);
+
+            if (at_panel_right && !_annotation.comment.empty())
+            {
+                if (ImGui::Selectable(
+                            "Comment###comment_hdr", false,
+                            ImGuiSelectableFlags_None))
+                {
+                    _subitem_target = SubItemTarget::Comment;
+                    _focus_level   = FocusLevel::SubItem;
+                    _request_focus = true;
+                }
+            }
+            else
+            {
+                ImGui::Text("Comment:");
+            }
+
+            if (_request_focus && comment_active)
+            {
+                ImGui::SetNextWindowFocus();
+                _request_focus = false;
+            }
+
+            ImGui::PushStyleColor(
+                    ImGuiCol_ChildBg, ImVec4(0.05f, 0.09f, 0.18f, 1.f));
+            ImGui::BeginChild(
+                    "##comment_box",
+                    ImVec2(rc_w, 60.f),
+                    true,
+                    comment_active ? ImGuiWindowFlags_None
+                                   : ImGuiWindowFlags_NoNav);
+            ImGui::PushTextWrapPos(0.f);
+            ImGui::TextUnformatted(
+                    _annotation.comment.empty()
+                            ? "(no comment)"
+                            : _annotation.comment.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        }
+
         ImGui::Spacing();
         if (ImGui::Button("Edit Comment"))
         {
@@ -688,7 +775,7 @@ void GameView::render()
         break;
     case FocusLevel::Panel:
         ImGui::TextDisabled(
-                "  [X] Confirm   [O] Back to panel select");
+                "  [X] Select / Enter scroll   [O] Back to panel select");
         break;
     case FocusLevel::SubItem:
         ImGui::TextDisabled(
@@ -796,8 +883,7 @@ void GameView::printDiagnostic()
         ok = false;
     }
 
-    if (ok)
-        ImGui::TextColored(Green, "All green");
+    (void)ok; // "All green" omitted — installed state is shown in metadata above
 }
 
 std::string GameView::get_min_system_version()

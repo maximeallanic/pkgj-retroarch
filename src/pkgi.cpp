@@ -1614,12 +1614,15 @@ int main()
                     0,
                     io.Fonts->GetGlyphRangesDefault()))
             throw std::runtime_error("failed to load ltn0.pvf");
-        if (!io.Fonts->AddFontFromFileTTF(
+        {
+            ImFontConfig merge_cfg;
+            merge_cfg.MergeMode = true;
+            io.Fonts->AddFontFromFileTTF(
                     "sa0:/data/font/pvf/jpn0.pvf",
                     20.0f,
-                    0,
-                    io.Fonts->GetGlyphRangesJapanese()))
-            throw std::runtime_error("failed to load jpn0.pvf");
+                    &merge_cfg,
+                    io.Fonts->GetGlyphRangesJapanese());
+        }
 #endif
         io.Fonts->GetTexDataAsRGBA32((uint8_t**)&pixels, &width, &height);
 #ifndef PKGI_SIMULATOR

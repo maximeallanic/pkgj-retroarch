@@ -71,12 +71,14 @@ private:
     // ── Focus hierarchy ──────────────────────────────────────────────────────
     // View  → D-pad picks left/right panel; X enters Panel; Circle closes view
     // Panel → ImGui nav inside panel; Circle returns to View
-    // SubItem → ImGui nav inside desc scroll; Circle returns to Panel
-    enum class FocusLevel { View, Panel, SubItem };
-    enum class FocusPanel { Left, Right };
-    FocusLevel _focus_level{FocusLevel::View};
-    FocusPanel _focused_panel{FocusPanel::Right};
-    bool       _request_focus{false}; // set true to seize ImGui focus next frame
+    // SubItem → ImGui nav inside desc/comment scroll; Circle returns to Panel
+    enum class FocusLevel  { View, Panel, SubItem };
+    enum class FocusPanel  { Left, Right };
+    enum class SubItemTarget { Description, Comment };
+    FocusLevel    _focus_level{FocusLevel::View};
+    FocusPanel    _focused_panel{FocusPanel::Right};
+    SubItemTarget _subitem_target{SubItemTarget::Description};
+    bool          _request_focus{false}; // set true to seize ImGui focus next frame
     // ────────────────────────────────────────────────────────────────────────
 
     std::unique_ptr<PatchInfoFetcher>    _patch_info_fetcher;
