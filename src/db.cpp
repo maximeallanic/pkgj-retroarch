@@ -491,6 +491,7 @@ void TitleDatabase::reload(
                         app_version,
                         fw_version,
                         /*selected=*/false,
+                        /*description=*/"",
                         /*user_flag=*/UserFlag::None,
                         /*user_comment=*/"",
                 });

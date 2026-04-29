@@ -1683,7 +1683,10 @@ int main()
                 if (input.pressed & pkgi_cancel_button())
                 {
                     if (gameview)
-                        gameview->close();
+                    {
+                        if (!gameview->handle_cancel())
+                            gameview->close();
+                    }
                     else if (config_editor)
                         config_editor->close();
                     else if (log_viewer)

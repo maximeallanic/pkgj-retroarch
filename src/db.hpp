@@ -68,6 +68,9 @@ struct DbItem
     std::string fw_version;
     bool selected;
 
+    // Fetched live from the PlayStation Store (not persisted to DB)
+    std::string description;
+
     // Personal annotation (loaded from AnnotationDatabase after reload)
     UserFlag    user_flag    = UserFlag::None;
     std::string user_comment;

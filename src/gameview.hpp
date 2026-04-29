@@ -4,10 +4,12 @@
 #include "comppackdb.hpp"
 #include "config.hpp"
 #include "db.hpp"
+#include "descriptionfetcher.hpp"
 #include "downloader.hpp"
 #include "imagefetcher.hpp"
 #include "install.hpp"
 #include "patchinfofetcher.hpp"
+#include "screenshotfetcher.hpp"
 
 #include <memory>
 
@@ -32,6 +34,12 @@ public:
 
     void render();
     void refresh();
+
+    // Called by pkgi.cpp instead of close() when the cancel button is pressed.
+    // Walks up the focus hierarchy one level per press.
+    // Returns true  → event consumed (don't close).
+    // Returns false → already at top level (caller should call close()).
+    bool handle_cancel();
 
     bool is_closed() const
     {
@@ -60,8 +68,22 @@ private:
 
     bool _closed{false};
 
-    std::unique_ptr<PatchInfoFetcher> _patch_info_fetcher;
-    ImageFetcher _image_fetcher;
+    // ── Focus hierarchy ──────────────────────────────────────────────────────
+    // View  → D-pad picks left/right panel; X enters Panel; Circle closes view
+    // Panel → ImGui nav inside panel; Circle returns to View
+    // SubItem → ImGui nav inside desc scroll; Circle returns to Panel
+    enum class FocusLevel { View, Panel, SubItem };
+    enum class FocusPanel { Left, Right };
+    FocusLevel _focus_level{FocusLevel::View};
+    FocusPanel _focused_panel{FocusPanel::Right};
+    bool       _request_focus{false}; // set true to seize ImGui focus next frame
+    // ────────────────────────────────────────────────────────────────────────
+
+    std::unique_ptr<PatchInfoFetcher>    _patch_info_fetcher;
+    ImageFetcher                         _image_fetcher;
+    std::unique_ptr<DescriptionFetcher>  _description_fetcher; // vita mode only
+    std::unique_ptr<ScreenshotFetcher>   _screenshot_fetcher;  // vita mode only
+    int                                  _selected_screenshot{-1};
 
     // --- Annotation state ---
     AnnotationDatabase* _annotationDb;

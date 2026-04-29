@@ -48,6 +48,9 @@ constexpr ThumbSize kThumbSizes[] = {
 };
 constexpr int kThumbSizeCount = 4;
 
+// Highlight border color when a panel is "focused" at View level
+constexpr ImU32 kFocusBorderCol = IM_COL32(90, 160, 255, 220);
+
 const char* presence_label(DbPresence presence)
 {
     switch (presence)
@@ -136,7 +139,13 @@ GameView::GameView(
     _comment_buf[sizeof(_comment_buf) - 1] = '\0';
 
     if (is_vita_mode())
+    {
         _patch_info_fetcher = std::make_unique<PatchInfoFetcher>(item->titleid);
+        _description_fetcher =
+                std::make_unique<DescriptionFetcher>(item);
+        _screenshot_fetcher =
+                std::make_unique<ScreenshotFetcher>(config, item);
+    }
 
     refresh();
 }
@@ -158,158 +167,410 @@ void GameView::render()
                     ImGuiWindowFlags_NoCollapse |
                     ImGuiWindowFlags_NoSavedSettings);
 
+    // ── Layout constants ─────────────────────────────────────────────────────
+    const int tsz = std::max(0, std::min(
+            _config->thumbnail_size, kThumbSizeCount - 1));
+    const float cover_w  = kThumbSizes[tsz].w;
+    const float cover_h  = kThumbSizes[tsz].h;
+    const bool  two_col  = (cover_w > 0.f);
+
+    // Reserve one line at the bottom for hint text
+    const float hint_h  = ImGui::GetFrameHeightWithSpacing();
+    const float avail_h  = ImGui::GetContentRegionAvail().y - hint_h;
+    const float col_gap  = ImGui::GetStyle().ItemSpacing.x;
+    const float left_w   = two_col ? (cover_w + 4.f) : 0.f;
+    const float right_w  = ImGui::GetContentRegionAvail().x
+                           - (two_col ? left_w + col_gap : 0.f);
+
+    // ── View-level D-pad: switch focused panel ────────────────────────────────
+    if (two_col && _focus_level == FocusLevel::View)
     {
-        const int tsz = std::max(0, std::min(
-                _config->thumbnail_size, kThumbSizeCount - 1));
-        const float kImagePanelW = kThumbSizes[tsz].w;
-        const float kImagePanelH = kThumbSizes[tsz].h;
-        auto* thumb_tex = _image_fetcher.get_texture();
-        const auto image_status = _image_fetcher.get_status();
-
-        if (kImagePanelW > 0.f)
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, false))
+            _focused_panel = FocusPanel::Left;
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false))
+            _focused_panel = FocusPanel::Right;
+        // X / face-down at View level enters the selected panel
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false))
         {
-            const ImGuiStyle& style = ImGui::GetStyle();
-            ImVec2 win_pos = ImGui::GetWindowPos();
-            const float title_bar_h = ImGui::GetFrameHeight();
-            ImVec2 panel_min(
-                    win_pos.x + (float)GameViewWidth
-                            - style.WindowPadding.x - kImagePanelW,
-                    win_pos.y + title_bar_h + style.WindowPadding.y);
-            ImVec2 panel_max(
-                    panel_min.x + kImagePanelW,
-                    panel_min.y + kImagePanelH);
-
-            ImDrawList* dl = ImGui::GetForegroundDrawList();
-            dl->AddRectFilled(panel_min, panel_max, IM_COL32(20, 20, 20, 230), 3.f);
-            dl->AddRect(panel_min, panel_max, IM_COL32(110, 110, 110, 255), 3.f);
-
-            if (thumb_tex)
-            {
-                float tw = static_cast<float>(vita2d_texture_get_width(thumb_tex));
-                float th = static_cast<float>(vita2d_texture_get_height(thumb_tex));
-                const float inner_w = kImagePanelW - 6.f;
-                const float inner_h = kImagePanelH - 6.f;
-                if (tw > inner_w) { th = th * inner_w / tw; tw = inner_w; }
-                if (th > inner_h) { tw = tw * inner_h / th; th = inner_h; }
-                // Top-align: centre horizontally, pin to top of inner area
-                ImVec2 img_min(
-                        panel_min.x + (kImagePanelW - tw) * 0.5f,
-                        panel_min.y + 3.f);
-                ImVec2 img_max(img_min.x + tw, img_min.y + th);
-                dl->AddImage((ImTextureID)thumb_tex, img_min, img_max);
-            }
-            else
-            {
-                if (image_status == ImageFetcher::Status::Downloading)
-                {
-                    draw_centered_status_text(
-                            dl,
-                            panel_min,
-                            kImagePanelW,
-                            kImagePanelH,
-                            "Downloading",
-                            "cover",
-                            IM_COL32(180, 190, 220, 220));
-                }
-                else if (image_status == ImageFetcher::Status::Error)
-                {
-                    draw_centered_status_text(
-                            dl,
-                            panel_min,
-                            kImagePanelW,
-                            kImagePanelH,
-                            "Download error",
-                            "no image available",
-                            IM_COL32(210, 150, 150, 220));
-                }
-            }
+            _focus_level   = FocusLevel::Panel;
+            _request_focus = true;
         }
     }
 
+    // ── Helper: draw a focus border around a screen rect ─────────────────────
+    auto draw_focus_border = [](ImVec2 min, ImVec2 max)
     {
-        const int tsz = std::max(0, std::min(
-                _config->thumbnail_size, kThumbSizeCount - 1));
-        const float panelW = kThumbSizes[tsz].w;
-        ImGui::PushTextWrapPos(
-                panelW > 0.f
-                ? (float)GameViewWidth
-                        - ImGui::GetStyle().WindowPadding.x
-                        - panelW
-                        - ImGui::GetStyle().ItemSpacing.x
-                : 0.f);
-    }
+        ImGui::GetWindowDrawList()->AddRect(
+                min, max, kFocusBorderCol, 4.f, 0, 2.f);
+    };
 
-    if (is_vita_mode())
+    // ── LEFT COLUMN: cover + screenshots (only when two_col) ─────────────────
+    if (two_col)
     {
-        ImGui::Text(fmt::format("Firmware version: {}", pkgi_get_system_version()).c_str());
-        ImGui::Text(fmt::format("Required firmware version: {}", get_min_system_version()).c_str());
-        ImGui::Text(" ");
-        ImGui::Text(fmt::format(
-                            "Installed game version: {}",
-                            _game_version.empty() ? "not installed" : _game_version)
-                            .c_str());
-        if (_comppack_versions.present && _comppack_versions.base.empty() &&
-            _comppack_versions.patch.empty())
+        const bool lc_active = (_focus_level == FocusLevel::Panel &&
+                                _focused_panel == FocusPanel::Left) ||
+                               (_focus_level == FocusLevel::SubItem &&
+                                _focused_panel == FocusPanel::Left);
+        const bool lc_hinted = (_focus_level == FocusLevel::View &&
+                                _focused_panel == FocusPanel::Left);
+
+        // Seize ImGui focus for this child when requested
+        if (_request_focus && _focused_panel == FocusPanel::Left &&
+            _focus_level == FocusLevel::Panel)
         {
-            ImGui::Text("Installed compatibility pack: unknown version");
+            ImGui::SetNextWindowFocus();
+            _request_focus = false;
+        }
+
+        ImVec2 lc_screen_min = ImGui::GetCursorScreenPos();
+
+        ImGui::BeginChild(
+                "##lc",
+                ImVec2(left_w, avail_h),
+                false,
+                (lc_active ? ImGuiWindowFlags_None
+                           : ImGuiWindowFlags_NoNav) |
+                        ImGuiWindowFlags_NoScrollbar |
+                        ImGuiWindowFlags_NoScrollWithMouse);
+
+        auto* thumb_tex     = _image_fetcher.get_texture();
+        const auto img_stat = _image_fetcher.get_status();
+        ImDrawList* ldl     = ImGui::GetWindowDrawList();
+
+        if (thumb_tex)
+        {
+            float tw = static_cast<float>(vita2d_texture_get_width(thumb_tex));
+            float th = static_cast<float>(vita2d_texture_get_height(thumb_tex));
+            if (tw > cover_w) { th = th * cover_w / tw; tw = cover_w; }
+            if (th > cover_h) { tw = tw * cover_h / th; th = cover_h; }
+            const float ox = (cover_w - tw) * 0.5f;
+            if (ox > 0.f)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ox);
+            ImGui::Image(reinterpret_cast<ImTextureID>(thumb_tex),
+                         ImVec2(tw, th));
         }
         else
         {
-            ImGui::Text(fmt::format(
-                                "Installed base compatibility pack: {}",
-                                _comppack_versions.base.empty() ? "no" : "yes")
-                                .c_str());
-            ImGui::Text(fmt::format(
-                                "Installed patch compatibility pack version: {}",
-                                _comppack_versions.patch.empty() ? "none"
-                                                                 : _comppack_versions.patch)
-                                .c_str());
+            ImVec2 pm = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(cover_w, cover_h));
+            ldl->AddRectFilled(
+                    pm,
+                    {pm.x + cover_w, pm.y + cover_h},
+                    IM_COL32(18, 22, 40, 220),
+                    4.f);
+            ldl->AddRect(
+                    pm,
+                    {pm.x + cover_w, pm.y + cover_h},
+                    IM_COL32(70, 80, 110, 255),
+                    4.f);
+            const char* l1 =
+                    (img_stat == ImageFetcher::Status::Downloading)
+                    ? "Downloading"
+                    : "No image";
+            const char* l2 =
+                    (img_stat == ImageFetcher::Status::Downloading)
+                    ? "cover..."
+                    : nullptr;
+            draw_centered_status_text(
+                    ldl, pm, cover_w, cover_h, l1, l2,
+                    IM_COL32(160, 170, 200, 200));
         }
-        ImGui::Text(" ");
+
+        // Screenshots — vita mode only
+        if (is_vita_mode() && _screenshot_fetcher)
+        {
+            ImGui::Spacing();
+            ImGui::TextDisabled("Screenshots");
+            ImGui::Spacing();
+
+            // Fit 3 screenshots across cover_w with small gaps
+            const float ss_gap = 4.f;
+            const float ss_w   = (cover_w - 2.f * ss_gap) / 3.f;
+            const float ss_h   = ss_w * 9.f / 16.f;
+
+            int shown = 0;
+            for (int i = 0;
+                 i < ScreenshotFetcher::MAX_SCREENSHOTS && shown < 3;
+                 ++i)
+            {
+                const auto ss_st =
+                        _screenshot_fetcher->get_status(i);
+                auto* ss_tx =
+                        _screenshot_fetcher->get_texture(i);
+
+                // Stop rendering once we hit a non-cached 404 slot
+                if (ss_st == ScreenshotFetcher::Status::Error && !ss_tx)
+                    break;
+
+                if (shown > 0)
+                    ImGui::SameLine(0, ss_gap);
+
+                if (ss_tx)
+                {
+                    const bool sel = (_selected_screenshot == i);
+                    if (sel)
+                        ImGui::PushStyleColor(
+                                ImGuiCol_Border,
+                                ImVec4(0.5f, 0.8f, 1.f, 1.f));
+                    if (ImGui::ImageButton(
+                                fmt::format("##ss{}", i).c_str(),
+                                reinterpret_cast<ImTextureID>(ss_tx),
+                                ImVec2(ss_w, ss_h)))
+                        _selected_screenshot = i;
+                    if (sel)
+                        ImGui::PopStyleColor();
+                }
+                else
+                {
+                    // Loading placeholder
+                    ImVec2 pm2 = ImGui::GetCursorScreenPos();
+                    ImGui::Dummy(ImVec2(ss_w, ss_h));
+                    ldl->AddRectFilled(
+                            pm2,
+                            {pm2.x + ss_w, pm2.y + ss_h},
+                            IM_COL32(15, 18, 32, 200),
+                            2.f);
+                    ldl->AddRect(
+                            pm2,
+                            {pm2.x + ss_w, pm2.y + ss_h},
+                            IM_COL32(55, 65, 90, 255),
+                            2.f);
+                }
+                ++shown;
+            }
+        }
+
+        ImGui::EndChild(); // ##lc
+
+        // Draw focus / hover border over the left column area
+        ImVec2 lc_screen_max{
+                lc_screen_min.x + left_w,
+                lc_screen_min.y + avail_h};
+        if (lc_active || lc_hinted)
+            draw_focus_border(lc_screen_min, lc_screen_max);
+
+        ImGui::SameLine(0, col_gap);
+    }
+
+    // ── RIGHT COLUMN (or full-width single column) ────────────────────────────
+    const bool rc_active = !two_col ||
+                           (_focus_level == FocusLevel::Panel &&
+                            _focused_panel == FocusPanel::Right) ||
+                           (_focus_level == FocusLevel::SubItem &&
+                            _focused_panel == FocusPanel::Right);
+    const bool rc_hinted = two_col &&
+                           _focus_level == FocusLevel::View &&
+                           _focused_panel == FocusPanel::Right;
+
+    if (_request_focus && (!two_col || _focused_panel == FocusPanel::Right) &&
+        _focus_level == FocusLevel::Panel)
+    {
+        ImGui::SetNextWindowFocus();
+        _request_focus = false;
+    }
+
+    ImVec2 rc_screen_min = ImGui::GetCursorScreenPos();
+
+    ImGui::BeginChild(
+            "##rc",
+            ImVec2(right_w, avail_h),
+            false,
+            (rc_active ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoNav));
+
+    // Content width inside the child (accounts for padding / scrollbar)
+    const float rc_w = ImGui::GetContentRegionAvail().x;
+    ImGui::PushTextWrapPos(0.f); // wrap at right edge of this child
+
+    if (is_vita_mode())
+    {
+        // ── Metadata rows ────────────────────────────────────────────────────
+        // Helper: label in dim text, value right-aligned at a fixed x offset.
+        const float label_x = 160.f;
+        auto row = [&](const char* label,
+                       const char* value,
+                       ImVec4 col = ImVec4(-1.f, -1.f, -1.f, -1.f))
+        {
+            ImGui::TextDisabled("%s", label);
+            ImGui::SameLine(label_x);
+            if (col.x >= 0.f)
+                ImGui::TextColored(col, "%s", value);
+            else
+                ImGui::Text("%s", value);
+        };
+
+        row("Title ID:", _item->titleid.c_str());
+
+        const auto sys_ver = pkgi_get_system_version();
+        const auto min_ver = get_min_system_version();
+        const bool fw_ok   = !min_ver.empty() && sys_ver >= min_ver;
+
+        row("Min firmware:",
+            min_ver.empty() ? "unknown" : min_ver.c_str());
+        row("System firmware:",
+            sys_ver.c_str(),
+            fw_ok ? ImVec4(0.3f, 1.f, 0.5f, 1.f)
+                  : ImVec4(1.f, 0.35f, 0.35f, 1.f));
+
+        const bool installed = !_game_version.empty();
+        row("Installed version:",
+            installed ? _game_version.c_str() : "not installed",
+            installed ? ImVec4(0.3f, 1.f, 0.5f, 1.f)
+                      : ImVec4(1.f, 0.88f, 0.25f, 1.f));
+
+        if (_comppack_versions.present &&
+            _comppack_versions.base.empty() &&
+            _comppack_versions.patch.empty())
+        {
+            ImGui::TextColored(
+                    ImVec4(1.f, 0.9f, 0.2f, 1.f),
+                    "Compat pack: installed (unknown version)");
+        }
+        else
+        {
+            row("Base compat pack:",
+                _comppack_versions.base.empty() ? "not installed" : "installed");
+            if (!_comppack_versions.patch.empty())
+                row("Patch compat pack:", _comppack_versions.patch.c_str());
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // ── Description ──────────────────────────────────────────────────────
+        if (_description_fetcher &&
+            _description_fetcher->get_status() ==
+                    DescriptionFetcher::Status::Found)
+        {
+            const auto desc = _description_fetcher->get_description();
+            ImGui::TextDisabled("Description");
+            ImGui::Spacing();
+
+            // Sub-item focus: let description scroll area receive ImGui nav
+            const bool desc_active =
+                    (_focus_level == FocusLevel::SubItem &&
+                     _focused_panel == FocusPanel::Right);
+
+            if (_request_focus && desc_active)
+            {
+                ImGui::SetNextWindowFocus();
+                _request_focus = false;
+            }
+
+            ImGui::PushStyleColor(
+                    ImGuiCol_ChildBg, ImVec4(0.05f, 0.09f, 0.18f, 1.f));
+            ImGui::BeginChild(
+                    "##desc", ImVec2(rc_w, 80.f), true,
+                    desc_active ? ImGuiWindowFlags_None
+                                : ImGuiWindowFlags_NoNav);
+            ImGui::PushTextWrapPos(0.f);
+            ImGui::TextUnformatted(desc.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+
+            // "Enter scroll" button — navigable in Panel level, enters SubItem
+            if (!desc_active)
+            {
+                if (ImGui::SmallButton("Scroll description ###descscroll"))
+                {
+                    _focus_level   = FocusLevel::SubItem;
+                    _request_focus = true;
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+        }
+
+        // ── Diagnostic ───────────────────────────────────────────────────────
         printDiagnostic();
-        ImGui::Text(" ");
+        ImGui::Spacing();
+
+        // ── Action buttons ───────────────────────────────────────────────────
+        if (_patch_info_fetcher &&
+            _patch_info_fetcher->get_status() ==
+                    PatchInfoFetcher::Status::Found)
+        {
+            if (ImGui::Button("Install game and patch###installgame"))
+                start_download_package();
+        }
+        else
+        {
+            if (ImGui::Button("Install game###installgame"))
+                start_download_package();
+        }
+        ImGui::SetItemDefaultFocus();
+        if (ImGui::IsItemFocused())
+            ImGui::SetScrollY(0.0f);
+
+        if (_base_comppack)
+        {
+            ImGui::SameLine();
+            if (!_downloader->is_in_queue(CompPackBase, _item->titleid))
+            {
+                if (ImGui::Button(
+                            "Install base compat pack###installbasecomppack"))
+                    start_download_comppack(false);
+            }
+            else
+            {
+                if (ImGui::Button(
+                            "Cancel base compat pack###installbasecomppack"))
+                    cancel_download_comppacks(false);
+            }
+        }
+        if (_patch_comppack)
+        {
+            ImGui::SameLine();
+            if (!_downloader->is_in_queue(CompPackPatch, _item->titleid))
+            {
+                if (ImGui::Button(fmt::format(
+                                          "Install patch compat {}###installpatchcommppack",
+                                          _patch_comppack->app_version)
+                                          .c_str()))
+                    start_download_comppack(true);
+            }
+            else
+            {
+                if (ImGui::Button(
+                            "Cancel patch compat###installpatchcommppack"))
+                    cancel_download_comppacks(true);
+            }
+        }
     }
     else
-    {        
-        ImGui::Text(fmt::format("Content ID: {}",
-                                _item->content.empty() ? "unknown" : _item->content).c_str());
-        ImGui::Text(fmt::format("Package size: {}", friendly_size(_item->size)).c_str());
-        ImGui::Text(fmt::format("Last update: {}",
-                                _item->date.empty() ? "unknown" : _item->date).c_str());
-        ImGui::Text(" ");
+    {
+        // ── PSP / non-vita mode ──────────────────────────────────────────────
+        ImGui::Text(fmt::format(
+                            "Content ID: {}",
+                            _item->content.empty() ? "unknown"
+                                                   : _item->content)
+                            .c_str());
+        ImGui::Text(fmt::format("Package size: {}", friendly_size(_item->size))
+                            .c_str());
+        ImGui::Text(fmt::format(
+                            "Last update: {}",
+                            _item->date.empty() ? "unknown" : _item->date)
+                            .c_str());
+        ImGui::Spacing();
+
         ImGui::Text("Diagnostic:");
-        ImGui::Text(fmt::format("- Status: {}", presence_label(_item->presence)).c_str());
-        ImGui::Text(fmt::format("- NoPspEmuDrm kernel plugin: {}",
-                                _nopspemudrm_present ? "present" : "not detected").c_str());
+        ImGui::Text(fmt::format("- Status: {}",
+                                presence_label(_item->presence))
+                            .c_str());
+        ImGui::Text(fmt::format(
+                            "- NoPspEmuDrm kernel plugin: {}",
+                            _nopspemudrm_present ? "present" : "not detected")
+                            .c_str());
         ImGui::Text("- Install as ISO: available");
         if (_nopspemudrm_present)
             ImGui::Text("- LiveArea PBP queue: available");
         else
             ImGui::Text("- LiveArea PBP queue: unavailable without plugin");
-        ImGui::Text(" ");
-    }
+        ImGui::Spacing();
 
-    ImGui::PopTextWrapPos();
-
-    if (is_vita_mode() && _patch_info_fetcher &&
-        _patch_info_fetcher->get_status() == PatchInfoFetcher::Status::Found)
-    {
-        if (ImGui::Button("Install game and patch###installgame"))
-            start_download_package();
-        ImGui::SetItemDefaultFocus();
-        if (ImGui::IsItemFocused())
-            ImGui::SetScrollY(0.0f);
-    }
-    else if (is_vita_mode())
-    {
-        if (ImGui::Button("Install game###installgame"))
-            start_download_package();
-        ImGui::SetItemDefaultFocus();
-        if (ImGui::IsItemFocused())
-            ImGui::SetScrollY(0.0f);
-    }
-    else
-    {
         if (ImGui::Button("Install as ISO###installpspiso"))
             start_download_package(PspInstallMode::Iso);
         ImGui::SetItemDefaultFocus();
@@ -323,36 +584,7 @@ void GameView::render()
         }
     }
 
-    if (is_vita_mode() && _base_comppack)
-    {
-        if (!_downloader->is_in_queue(CompPackBase, _item->titleid))
-        {
-            if (ImGui::Button("Install base compatibility pack###installbasecomppack"))
-                start_download_comppack(false);
-        }
-        else
-        {
-            if (ImGui::Button("Cancel base compatibility pack installation###installbasecomppack"))
-                cancel_download_comppacks(false);
-        }
-    }
-    if (is_vita_mode() && _patch_comppack)
-    {
-        if (!_downloader->is_in_queue(CompPackPatch, _item->titleid))
-        {
-            if (ImGui::Button(fmt::format(
-                                      "Install compatibility pack {}###installpatchcommppack",
-                                      _patch_comppack->app_version)
-                                      .c_str()))
-                start_download_comppack(true);
-        }
-        else
-        {
-            if (ImGui::Button("Cancel patch compatibility pack installation###installpatchcommppack"))
-                cancel_download_comppacks(true);
-        }
-    }
-
+    // ── Annotations (both modes) ─────────────────────────────────────────────
     if (_annotationDb)
     {
         if (_ime_active && pkgi_dialog_input_update())
@@ -368,7 +600,7 @@ void GameView::render()
         ImGui::Text("Personal Notes");
         ImGui::Spacing();
 
-        // ── Flag — compact cycling selector  [ < ]  [label]  [ > ] ──────────
+        // Flag — compact cycling selector  [ < ]  [label]  [ > ]
         {
             auto cycle = [&](int delta)
             {
@@ -388,12 +620,10 @@ void GameView::render()
 
             ImGui::SameLine();
 
-            // Centre label button — clicking also cycles forward
             const bool active = (_annotation.flag != UserFlag::None);
             if (active)
                 ImGui::PushStyleColor(
                         ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
-            // Fixed width so the window doesn't shift as text changes
             if (ImGui::Button(
                         fmt::format(
                                 "{:<18}###flaglabel",
@@ -433,7 +663,57 @@ void GameView::render()
         }
     }
 
+    ImGui::PopTextWrapPos();
+    ImGui::EndChild(); // ##rc
+
+    // Draw focus border around the right column
+    if (rc_active || rc_hinted)
+    {
+        ImVec2 rc_screen_max{
+                rc_screen_min.x + right_w,
+                rc_screen_min.y + avail_h};
+        draw_focus_border(rc_screen_min, rc_screen_max);
+    }
+
+    // ── Hint bar ─────────────────────────────────────────────────────────────
+    ImGui::Spacing();
+    switch (_focus_level)
+    {
+    case FocusLevel::View:
+        if (two_col)
+            ImGui::TextDisabled(
+                    "  [<][>] Switch panel   [X] Enter panel   [O] Close");
+        else
+            ImGui::TextDisabled("  [O] Close");
+        break;
+    case FocusLevel::Panel:
+        ImGui::TextDisabled(
+                "  [X] Confirm   [O] Back to panel select");
+        break;
+    case FocusLevel::SubItem:
+        ImGui::TextDisabled(
+                "  [^][v] Scroll   [O] Back");
+        break;
+    }
+
     ImGui::End();
+}
+
+bool GameView::handle_cancel()
+{
+    switch (_focus_level)
+    {
+    case FocusLevel::SubItem:
+        _focus_level   = FocusLevel::Panel;
+        _request_focus = true;
+        return true;
+    case FocusLevel::Panel:
+        _focus_level = FocusLevel::View;
+        return true;
+    case FocusLevel::View:
+        return false; // caller (pkgi.cpp) will call close()
+    }
+    return false;
 }
 
 static const auto Red = ImVec4(1.0f, 0.2f, 0.2f, 1.0f);

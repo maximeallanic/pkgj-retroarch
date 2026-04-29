@@ -65,6 +65,8 @@ add_executable(pkgj
   src/filedownload.cpp
   src/browserview.cpp
   src/gameview.cpp
+  src/descriptionfetcher.cpp
+  src/screenshotfetcher.cpp
   src/logbuffer.cpp
   src/logviewer.cpp
   src/patchinfo.cpp
