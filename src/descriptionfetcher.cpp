@@ -5,6 +5,7 @@
 #include "pkgi.hpp"
 
 #include <fmt/format.h>
+#include <mutex>
 #include <vector>
 
 namespace
