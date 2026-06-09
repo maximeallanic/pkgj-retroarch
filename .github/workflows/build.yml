@@ -50,7 +50,7 @@ jobs:
         with:
           file: pkgj.vpk
           release_name: "PKGJ ${{ github.ref_name }}"
-          prerelease: ${{ contains(github.ref_name, 'beta') }}
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'test') }}
       - name: Prepare new version
         run: |
           git config --global user.name "GitHub actions"

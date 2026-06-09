@@ -126,9 +126,9 @@ UDP multicast address 239.255.0.100:30000. To receive them you can use [socat][]
 Pushing a tag in the form `v0.56` will create a new release and build
 `pkgj.vpk`.
 
-If you want to build a beta, you can push a tag in the form `v0.56-beta1` which
-will create a pre-release. Such a release will not be picked up by the auto
-update.
+If you want to build a beta or test, you can push a tag in the form `vX.YZ-beta1`
+or `vX.YZ-test0` which will create a pre-release. Such a release will not be
+picked up by the auto update.
 
 # License
 
