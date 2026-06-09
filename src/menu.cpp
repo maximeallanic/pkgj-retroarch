@@ -58,14 +58,14 @@ static const MenuEntry menu_entries[] = {
 
         {MenuRefresh, "Refresh", 0},
 
-        {MenuShow, "Show games", 1},
-        {MenuShow, "Show DLCs", 2},
-        {MenuShow, "Show demos", 64},
-        {MenuShow, "Show themes", 32},
-        {MenuShow, "Show PS1 games", 4},
+        {MenuShow, "Show PSV games", 1},
+        {MenuShow, "Show PSV DLCs", 2},
+        {MenuShow, "Show PSV themes", 32},
+        {MenuShow, "Show PSV demos", 64},
+        {MenuShow, "Show PSM games", 16},
         {MenuShow, "Show PSP games", 8},
         {MenuShow, "Show PSP DLCs", 128},
-        {MenuShow, "Show PSM games", 16},
+        {MenuShow, "Show PS1 games", 4},
 
         {MenuSelectedClear, "Clear selected", 0},
 };
