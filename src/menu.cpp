@@ -43,7 +43,7 @@ static const MenuEntry menu_entries[] = {
         {MenuSearchClear, PKGI_UTF8_CLEAR " clear", 0},
 
         {MenuText, "Sort by:", 0},
-        {MenuSort, "Title", SortByTitle},
+        {MenuSort, "Title ID", SortByTitle},
         {MenuSort, "Region", SortByRegion},
         {MenuSort, "Name", SortByName},
         {MenuSort, "Size", SortBySize},
