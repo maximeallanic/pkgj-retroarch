@@ -1,5 +1,7 @@
 #include "pkgi.hpp"
 
+#include <algorithm>  // std::find, std::sort
+
 extern "C"
 {
 #include "style.h"
