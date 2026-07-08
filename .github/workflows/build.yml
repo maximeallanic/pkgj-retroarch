@@ -57,7 +57,10 @@ jobs:
 
           # Export the bundled Conan recipes from ci/
           cd ci
-          conan export conan-vitasdk
+          # Export the Docker-aware vitasdk recipe FIRST — it satisfies the
+          # vitasdk-toolchain requirement using the container's musl-linked vitasdk
+          # instead of downloading the glibc-only binary (which fails on Alpine).
+          conan export conan-vitasdk-docker
           conan export conan-fmt
           conan export conan-libzip
           conan export conan-vitasqlite

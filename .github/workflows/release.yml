@@ -48,7 +48,7 @@ jobs:
           cp ci/conan/profiles/vita ~/.conan2/profiles/vita
           cp ci/conan/settings.yml ~/.conan2/settings.yml
           cd ci
-          conan export conan-vitasdk
+          conan export conan-vitasdk-docker
           conan export conan-fmt
           conan export conan-libzip
           conan export conan-vitasqlite
