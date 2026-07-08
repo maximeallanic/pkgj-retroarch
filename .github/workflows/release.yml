@@ -27,14 +27,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # vitasdk/vitasdk is Alpine-based (runs as root).
-      # python3 + cmake + git are pre-installed; add pip, ninja and host compiler.
       - name: Install build tools
         run: |
           apk add --no-cache py3-pip ninja gcc g++ musl-dev
 
-      - name: Install Poetry
-        run: pip3 install 'poetry<2.0' --break-system-packages
+      - name: Install Conan
+        run: pip3 install "conan>=2.0.7,<3" --break-system-packages
 
       - name: Cache Conan packages
         uses: actions/cache@v4
@@ -43,19 +41,31 @@ jobs:
           key: conan-vita-alpine-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
           restore-keys: conan-vita-alpine-
 
-      - name: Setup Conan
-        working-directory: ci
-        run: ./setup_conan.sh
+      - name: Setup Conan profiles and export local packages
+        run: |
+          conan profile detect
+          mkdir -p ~/.conan2/profiles
+          cp ci/conan/profiles/vita ~/.conan2/profiles/vita
+          cp ci/conan/settings.yml ~/.conan2/settings.yml
+          cd ci
+          conan export conan-vitasdk
+          conan export conan-fmt
+          conan export conan-libzip
+          conan export conan-vitasqlite
 
-      - name: Build pkgj.vpk
+      - name: Install Conan dependencies
         run: |
           mkdir -p ci/build && cd ci/build
-          poetry run conan install ../.. \
+          conan install ../.. \
             --build missing \
             -s build_type=Release \
             --profile:host vita \
             --output-folder .
-          poetry run conan build ../.. \
+
+      - name: Build pkgj.vpk
+        run: |
+          cd ci/build
+          conan build ../.. \
             -s build_type=Release \
             --profile:host vita \
             --output-folder .

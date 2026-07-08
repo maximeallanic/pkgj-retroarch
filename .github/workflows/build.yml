@@ -24,15 +24,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # vitasdk/vitasdk is Alpine-based (runs as root).
-      # python3 + cmake + git are pre-installed; add pip, ninja and host compiler
-      # (gcc/g++ needed by Conan's host profile detection).
+      # vitasdk/vitasdk = Alpine Linux, runs as root, has python3 + cmake + git.
+      # ninja and host gcc/g++ are needed; pip/poetry are installed manually.
       - name: Install build tools
         run: |
           apk add --no-cache py3-pip ninja gcc g++ musl-dev
 
-      - name: Install Poetry
-        run: pip3 install 'poetry<2.0' --break-system-packages
+      # The poetry.lock pins pyyaml 6.0 which fails to build on Python 3.14
+      # (the version shipped in current vitasdk/vitasdk). Bypass poetry entirely:
+      # install conan directly via pip with no version lock.
+      - name: Install Conan
+        run: pip3 install "conan>=2.0.7,<3" --break-system-packages
 
       - name: Cache Conan packages
         uses: actions/cache@v4
@@ -41,19 +43,38 @@ jobs:
           key: conan-vita-alpine-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
           restore-keys: conan-vita-alpine-
 
-      - name: Setup Conan
-        working-directory: ci
-        run: ./setup_conan.sh
+      - name: Setup Conan profiles and export local packages
+        run: |
+          # Create default host profile (detects gcc from apk)
+          conan profile detect
 
-      - name: Build pkgj.vpk
+          # Install vita cross-compilation profile
+          mkdir -p ~/.conan2/profiles
+          cp ci/conan/profiles/vita ~/.conan2/profiles/vita
+
+          # Install PSVita custom settings (adds PSVita os target)
+          cp ci/conan/settings.yml ~/.conan2/settings.yml
+
+          # Export the bundled Conan recipes from ci/
+          cd ci
+          conan export conan-vitasdk
+          conan export conan-fmt
+          conan export conan-libzip
+          conan export conan-vitasqlite
+
+      - name: Install Conan dependencies
         run: |
           mkdir -p ci/build && cd ci/build
-          poetry run conan install ../.. \
+          conan install ../.. \
             --build missing \
             -s build_type=Release \
             --profile:host vita \
             --output-folder .
-          poetry run conan build ../.. \
+
+      - name: Build pkgj.vpk
+        run: |
+          cd ci/build
+          conan build ../.. \
             -s build_type=Release \
             --profile:host vita \
             --output-folder .
