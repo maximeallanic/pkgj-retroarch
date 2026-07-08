@@ -21,6 +21,7 @@ patches:
   "1.9.2":
     - patch_file: "patches/0001-cmake-install-bundle.patch"
     - patch_file: "patches/0002-for-vita.patch"
+
   "1.8.0":
     - patch_file: "patches/0001-cmake-install-bundle.patch"
     - patch_file: "patches/0002-for-vita.patch"

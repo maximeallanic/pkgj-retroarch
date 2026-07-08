@@ -99,10 +99,6 @@ class LibZipConan(ConanFile):
 
     def generate(self):
         tc = CMakeToolchain(self)
-        # CMake 4.x removed backward compat with cmake_minimum_required < 3.5.
-        # libzip CMakeLists.txt uses an older minimum — inject this policy so
-        # CMake 4.x (shipped with Alpine / vitasdk image) still accepts it.
-        tc.variables["CMAKE_POLICY_VERSION_MINIMUM"] = "3.5"
         tc.variables["BUILD_TOOLS"] = self.options.tools
         tc.variables["BUILD_REGRESS"] = False
         tc.variables["BUILD_EXAMPLES"] = False
@@ -127,6 +123,14 @@ class LibZipConan(ConanFile):
         apply_conandata_patches(self)
 
         top_cmakelists = os.path.join(self.source_folder, "CMakeLists.txt")
+
+        # CMake 4.x rejects cmake_minimum_required < 3.5 — bump it.
+        replace_in_file(
+            self,
+            top_cmakelists,
+            "cmake_minimum_required(VERSION 3.0.2)",
+            "cmake_minimum_required(VERSION 3.5)",
+        )
         # Honor zstd enabled
         if self._has_zstd_support:
 
@@ -165,7 +169,7 @@ class LibZipConan(ConanFile):
         )
 
     def build(self):
-        self._patch_sources()
+        self._patch_sources()  # applies 0003-cmake4-min-version.patch
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
