@@ -60,7 +60,8 @@ jobs:
             --build missing \
             -s build_type=Release \
             --profile:host vita \
-            --output-folder .
+            --output-folder . \
+            --conf "tools.cmake.cmaketoolchain:extra_variables={\"CMAKE_POLICY_VERSION_MINIMUM\": \"3.5\"}"
 
       - name: Build pkgj.vpk
         run: |

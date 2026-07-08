@@ -68,11 +68,14 @@ jobs:
       - name: Install Conan dependencies
         run: |
           mkdir -p ci/build && cd ci/build
+          # CMAKE_POLICY_VERSION_MINIMUM=3.5 is required because Alpine ships
+          # CMake 4.x which removed backward compat with cmake_minimum_required < 3.5.
           conan install ../.. \
             --build missing \
             -s build_type=Release \
             --profile:host vita \
-            --output-folder .
+            --output-folder . \
+            --conf "tools.cmake.cmaketoolchain:extra_variables={\"CMAKE_POLICY_VERSION_MINIMUM\": \"3.5\"}"
 
       - name: Build pkgj.vpk
         run: |
