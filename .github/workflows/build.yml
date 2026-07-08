@@ -1,65 +1,61 @@
-name: build
-run-name: Build
-on: [push]
+name: Build pkgj-retroarch
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build PS Vita .vpk (vitasdk/vitasdk)
+    runs-on: ubuntu-24.04
+    container:
+      image: vitasdk/vitasdk
+
     steps:
       - uses: actions/checkout@v4
-      - name: Install apt dependencies
-        run: sudo apt-get install -y ninja-build g++-12 python3-poetry
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-          cache: 'poetry'
+
+      - name: Install build tools
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            ninja-build g++ python3-pip cmake git
+
+      - name: Install Poetry
+        run: pip3 install 'poetry<2.0' --break-system-packages
+
       - name: Cache Conan packages
-        id: cache-conan
-        if: ${{ github.event.ref == 'refs/heads/master' }}
         uses: actions/cache@v4
         with:
           path: ~/.conan2/p
-          key: ${{ runner.os }}-conan
-      - run: ci/ci.sh
-      - name: Upload linux build
-        uses: actions/upload-artifact@v4
-        with:
-          name: pkgj_cli
-          path: ci/buildhost/pkgj_cli
-      - name: Upload vita build
-        uses: actions/upload-artifact@v4
-        with:
-          name: pkgj.vpk
-          path: ci/build/pkgj.vpk
-  publish:
-    needs: build
-    if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: last
-      - name: Remove previous version
-        run: |
-          rm *.vpk
-          refname=${{ github.ref_name }}
-          echo -n ${refname:1} > version
-      - uses: actions/download-artifact@v4
-        with:
-          name: pkgj.vpk
-      - uses: svenstaro/upload-release-action@v2
-        with:
-          file: pkgj.vpk
-          release_name: "PKGJ ${{ github.ref_name }}"
-          prerelease: ${{ contains(github.ref_name, 'beta') }}
-      - name: Prepare new version
-        run: |
-          git config --global user.name "GitHub actions"
-          git config --global user.email "actions@github.com"
+          key: conan-vita-${{ runner.os }}-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
+          restore-keys: conan-vita-${{ runner.os }}-
 
-          mv pkgj.vpk pkgj-${{ github.ref_name }}.vpk
-          git add -u
-          git add pkgj-${{ github.ref_name }}.vpk
-          git commit -m "Push ${{ github.ref_name }}"
-      - name: Upload new version
-        if: ${{ !contains(github.ref_name, 'beta') }}
-        run: git push origin last
+      - name: Setup Conan
+        working-directory: ci
+        run: ./setup_conan.sh
+
+      - name: Build pkgj.vpk
+        run: |
+          mkdir -p ci/build && cd ci/build
+          poetry run conan install ../.. \
+            --build missing \
+            -s build_type=Release \
+            --profile:host vita \
+            --output-folder .
+          poetry run conan build ../.. \
+            -s build_type=Release \
+            --profile:host vita \
+            --output-folder .
+
+      - name: Upload pkgj.vpk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkgj-retroarch
+          path: ci/build/pkgj.vpk
+          if-no-files-found: error
