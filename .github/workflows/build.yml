@@ -10,6 +10,10 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     name: Build PS Vita .vpk (vitasdk/vitasdk)
@@ -20,21 +24,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tools
+      # vitasdk/vitasdk is Arch Linux based — use pacman.
+      # Most tools (python, cmake, ninja, git, gcc) are pre-installed in the image;
+      # we only ensure they are present and install Poetry via pip.
+      - name: Install missing build tools
         run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends \
-            ninja-build g++ python3-pip cmake git
+          pacman -Sy --noconfirm --needed python python-pip git ninja cmake gcc
 
       - name: Install Poetry
-        run: pip3 install 'poetry<2.0' --break-system-packages
+        run: python -m pip install 'poetry<2.0' --break-system-packages
 
       - name: Cache Conan packages
         uses: actions/cache@v4
         with:
           path: ~/.conan2/p
-          key: conan-vita-${{ runner.os }}-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
-          restore-keys: conan-vita-${{ runner.os }}-
+          key: conan-vita-archlinux-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
+          restore-keys: conan-vita-archlinux-
 
       - name: Setup Conan
         working-directory: ci
