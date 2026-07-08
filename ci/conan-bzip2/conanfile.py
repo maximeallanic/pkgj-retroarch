@@ -52,6 +52,8 @@ class Bzip2Conan(ConanFile):
 
     def generate(self):
         tc = CMakeToolchain(self)
+        # CMake 4.x removed backward compat with cmake_minimum_required < 3.5.
+        tc.variables["CMAKE_POLICY_VERSION_MINIMUM"] = "3.5"
         tc.variables["BZ2_BUILD_EXE"] = self.options.build_executable
         tc.variables["BZ2_SRC_DIR"] = self.source_folder.replace("\\", "/")
         tc.variables["BZ2_VERSION_MAJOR"] = Version(self.version).major
