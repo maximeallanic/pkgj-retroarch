@@ -27,19 +27,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install missing build tools
+      # vitasdk/vitasdk is Alpine-based (runs as root).
+      # python3 + cmake + git are pre-installed; add pip, ninja and host compiler.
+      - name: Install build tools
         run: |
-          pacman -Sy --noconfirm --needed python python-pip git ninja cmake gcc
+          apk add --no-cache py3-pip ninja gcc g++ musl-dev
 
       - name: Install Poetry
-        run: python -m pip install 'poetry<2.0' --break-system-packages
+        run: pip3 install 'poetry<2.0' --break-system-packages
 
       - name: Cache Conan packages
         uses: actions/cache@v4
         with:
           path: ~/.conan2/p
-          key: conan-vita-archlinux-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
-          restore-keys: conan-vita-archlinux-
+          key: conan-vita-alpine-${{ hashFiles('ci/**/*.py', 'conanfile.py') }}
+          restore-keys: conan-vita-alpine-
 
       - name: Setup Conan
         working-directory: ci
