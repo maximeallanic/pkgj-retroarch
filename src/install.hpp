@@ -10,6 +10,7 @@ struct CompPackVersion
     std::string patch;
 };
 
+// Keep existing functions (used internally or for backward compat)
 std::vector<std::string> pkgi_get_installed_games();
 std::vector<std::string> pkgi_get_installed_themes();
 std::string pkgi_get_game_version(const std::string& titleid);
@@ -26,3 +27,13 @@ void pkgi_install_psmgame(const char* contentid);
 void pkgi_install_pspgame(const char* partition, const char* contentid);
 void pkgi_install_pspgame_as_iso(const char* partition, const char* contentid);
 void pkgi_install_pspdlc(const char* partition, const char* contentid);
+
+// ---- RetroArch ROM install ----
+// Moves a downloaded ROM file into ux0:roms/<system>/<filename>.
+// src_path : full path of the downloaded file (e.g. ux0:pkgj/<id>.zip)
+// system   : system sub-directory name (e.g. "gb", "gba", "snes")
+// filename : destination filename (e.g. "game.zip")
+void pkgi_install_rom(
+        const std::string& src_path,
+        const std::string& system,
+        const std::string& filename);

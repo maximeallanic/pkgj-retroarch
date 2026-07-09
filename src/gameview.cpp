@@ -900,7 +900,8 @@ std::string GameView::get_min_system_version()
 
 bool GameView::is_vita_mode() const
 {
-    return _mode == ModeGames;
+    // ROM modes don't have PSN GameView comppack features
+    return false;
 }
 
 void GameView::refresh()

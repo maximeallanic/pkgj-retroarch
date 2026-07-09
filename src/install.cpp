@@ -310,3 +310,25 @@ void pkgi_install_pspdlc(const char* partition, const char* contentid)
     pkgi_move_merge(path, dest);
     pkgi_delete_dir(path);
 }
+
+// ---- RetroArch ROM install ----
+void pkgi_install_rom(
+        const std::string& src_path,
+        const std::string& system,
+        const std::string& filename)
+{
+    const std::string dest_dir = fmt::format("ux0:roms/{}", system);
+    pkgi_mkdirs(dest_dir.c_str());
+
+    const std::string dest_path = fmt::format("{}/{}", dest_dir, filename);
+
+    LOGF("Installing ROM: {} -> {}", src_path, dest_path);
+
+    // If destination already exists, remove it first
+    if (pkgi_file_exists(dest_path.c_str()))
+        pkgi_rm(dest_path.c_str());
+
+    pkgi_rename(src_path, dest_path);
+
+    LOGF("ROM installed: {}", dest_path);
+}

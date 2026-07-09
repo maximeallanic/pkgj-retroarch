@@ -66,7 +66,7 @@ typedef enum
 } State;
 
 State state = StateBrowse;
-Mode mode = ModeGames;
+Mode mode = ModeGB;
 
 uint32_t first_item;
 uint32_t selected_item;
@@ -120,52 +120,16 @@ const char* pkgi_get_cancel_str(void)
     return pkgi_cancel_button() == PKGI_BUTTON_O ? PKGI_UTF8_O : PKGI_UTF8_X;
 }
 
-Type mode_to_type(Mode mode)
+Type mode_to_type(Mode /*mode*/)
 {
-    switch (mode)
-    {
-    case ModeGames:
-        return Game;
-    case ModeDlcs:
-        return Dlc;
-    case ModePsmGames:
-        return PsmGame;
-    case ModePsxGames:
-        return PsxGame;
-    case ModePspGames:
-        return PspGame;
-    case ModePspDlcs:
-        return PspDlc;
-    case ModeDemos:
-    case ModeThemes:
-        throw formatEx<std::runtime_error>(
-                "unsupported mode {}", static_cast<int>(mode));
-    }
-    throw formatEx<std::runtime_error>(
-            "unknown mode {}", static_cast<int>(mode));
+    // All modes are RetroArch ROM systems — use RomGame download type
+    return RomGame;
 }
 
-BgdlType mode_to_bgdl_type(Mode mode)
+BgdlType mode_to_bgdl_type(Mode /*mode*/)
 {
-    switch (mode)
-    {
-    case ModePspGames:
-    case ModePsxGames:
-    case ModePspDlcs:
-        return BgdlTypePsp;
-    case ModePsmGames:
-        return BgdlTypePsm;
-    case ModeGames:
-    case ModeDemos:
-        return BgdlTypeGame;
-    case ModeDlcs:
-        return BgdlTypeDlc;
-    case ModeThemes:
-        return BgdlTypeTheme;
-    default:
-        throw formatEx<std::runtime_error>(
-                "unsupported bgdl mode {}", static_cast<int>(mode));
-    }
+    // ROM modes do not use bgdl — return a default that is never reached
+    return BgdlTypeGame;
 }
 
 void configure_db(TitleDatabase* db, const char* search, const Config* config)
@@ -174,9 +138,7 @@ void configure_db(TitleDatabase* db, const char* search, const Config* config)
     {
         db->reload(
                 mode,
-                mode == ModeGames || mode == ModeDlcs
-                        ? config->filter
-                        : config->filter & ~DbFilterInstalled,
+                config->filter,
                 config->sort,
                 config->order,
                 search ? search : "",
@@ -197,22 +159,14 @@ std::string const& pkgi_get_url_from_mode(Mode mode)
 {
     switch (mode)
     {
-    case ModeGames:
-        return config.games_url;
-    case ModeDlcs:
-        return config.dlcs_url;
-    case ModeDemos:
-        return config.demos_url;
-    case ModeThemes:
-        return config.themes_url;
-    case ModePsmGames:
-        return config.psm_games_url;
-    case ModePspGames:
-        return config.psp_games_url;
-    case ModePspDlcs:
-        return config.psp_dlcs_url;
-    case ModePsxGames:
-        return config.psx_games_url;
+    case ModeGB:      return config.gb_url;
+    case ModeGBC:     return config.gbc_url;
+    case ModeGBA:     return config.gba_url;
+    case ModeSNES:    return config.snes_url;
+    case ModeNES:     return config.nes_url;
+    case ModeGenesis: return config.genesis_url;
+    case ModePS1:     return config.ps1_url;
+    case ModePSP:     return config.psp_url;
     }
     throw std::runtime_error(
             fmt::format("unknown mode: {}", static_cast<int>(mode)));
@@ -377,7 +331,7 @@ void pkgi_refresh_thread(void)
     LOG("Checking for app updates");
     try
     {
-        auto mode_count = ModeCount + (config.comppack_url.empty() ? 0 : 2);
+        const auto mode_count = ModeCount;
 
         ScopeProcessLock lock;
         for (int i = 0; i < ModeCount; ++i)
@@ -396,33 +350,6 @@ void pkgi_refresh_thread(void)
             }
             auto const http = std::make_unique<VitaHttp>();
             db->update(mode, http.get(), url);
-        }
-        if (!config.comppack_url.empty())
-        {
-            {
-                std::lock_guard<Mutex> lock(refresh_mutex);
-                current_action = fmt::format(
-                        "Refreshing games compatibility packs [{}/{}]",
-                        mode_count - 1,
-                        mode_count);
-            }
-            {
-                auto const http = std::make_unique<VitaHttp>();
-                comppack_db_games->update(
-                        http.get(), config.comppack_url + "entries.txt");
-            }
-            {
-                std::lock_guard<Mutex> lock(refresh_mutex);
-                current_action = fmt::format(
-                        "Refreshing updates compatibility packs [{}/{}]",
-                        mode_count,
-                        mode_count);
-            }
-            {
-                auto const http = std::make_unique<VitaHttp>();
-                comppack_db_updates->update(
-                        http.get(), config.comppack_url + "entries_patch.txt");
-            }
         }
         first_item = 0;
         selected_item = 0;
@@ -443,9 +370,8 @@ void pkgi_refresh_thread(void)
 
 const char* pkgi_get_mode_partition()
 {
-    return mode == ModePspGames || mode == ModePspDlcs || mode == ModePsxGames
-                   ? config.install_psp_psx_location.c_str()
-                   : "ux0:";
+    // All ROM modes install to ux0:
+    return "ux0:";
 }
 
 void pkgi_refresh_installed_packages()
@@ -717,61 +643,21 @@ void pkgi_do_main(Downloader& downloader, pkgi_input* input)
 
         if (item->presence == PresenceUnknown)
         {
-            switch (mode)
+            // For all RetroArch ROM modes: check if ROM file exists in ux0:roms/<system>/
+            if (downloader.is_in_queue(RomGame, item->content))
+                item->presence = PresenceInstalling;
+            else
             {
-            case ModeGames:
-            case ModeDemos:
-                if (pkgi_is_installed(titleid))
+                // Derive expected ROM filename from URL
+                std::string rom_filename = item->content + ".zip";
+                const auto slash_pos = item->url.rfind('/');
+                if (slash_pos != std::string::npos && slash_pos + 1 < item->url.size())
+                    rom_filename = item->url.substr(slash_pos + 1);
+                const auto rom_path = fmt::format(
+                        "ux0:roms/{}/{}", item->system, rom_filename);
+                if (pkgi_file_exists(rom_path.c_str()))
                     item->presence = PresenceInstalled;
-                else if (downloader.is_in_queue(Game, item->content))
-                    item->presence = PresenceInstalling;
-                break;
-            case ModePsmGames:
-                if (pkgi_psm_is_installed(titleid))
-                    item->presence = PresenceInstalled;
-                else if (downloader.is_in_queue(PsmGame, item->content))
-                    item->presence = PresenceInstalling;
-                break;
-            case ModePspDlcs:
-                if (pkgi_psp_is_installed(
-                            pkgi_get_mode_partition(), item->content.c_str()))
-                    item->presence = PresenceGamePresent;
-                else if (downloader.is_in_queue(PspGame, item->content))
-                    item->presence = PresenceInstalling;
-                break;
-            case ModePspGames:
-                if (pkgi_psp_is_installed(
-                            pkgi_get_mode_partition(), item->content.c_str()))
-                    item->presence = PresenceInstalled;
-                else if (downloader.is_in_queue(PspGame, item->content))
-                    item->presence = PresenceInstalling;
-                break;
-            case ModePsxGames:
-                if (pkgi_psx_is_installed(
-                            pkgi_get_mode_partition(), item->content.c_str()))
-                    item->presence = PresenceInstalled;
-                else if (downloader.is_in_queue(PsxGame, item->content))
-                    item->presence = PresenceInstalling;
-                break;
-            case ModeDlcs:
-                if (downloader.is_in_queue(Dlc, item->content))
-                    item->presence = PresenceInstalling;
-                else if (pkgi_dlc_is_installed(item->content.c_str()))
-                    item->presence = PresenceInstalled;
-                else if (pkgi_is_installed(titleid))
-                    item->presence = PresenceGamePresent;
-                break;
-            case ModeThemes:
-                if (pkgi_theme_is_installed(item->content))
-                    item->presence = PresenceInstalled;
-                else if (pkgi_is_installed(titleid))
-                    item->presence = PresenceGamePresent;
-                break;
-            }
-
-            if (item->presence == PresenceUnknown)
-            {
-                if (pkgi_is_incomplete(
+                else if (pkgi_is_incomplete(
                             pkgi_get_mode_partition(), item->content.c_str()))
                     item->presence = PresenceIncomplete;
                 else
@@ -943,50 +829,7 @@ void pkgi_do_main(Downloader& downloader, pkgi_input* input)
             return;
         DbItem* item = db->get(selected_item);
 
-        if (mode == ModeGames || mode == ModePspGames)
-            gameview = std::make_unique<GameView>(
-                mode,
-                    &config,
-                    &downloader,
-                    item,
-                mode == ModeGames ? comppack_db_games->get(item->titleid)
-                          : std::optional<CompPackDatabase::Item>{},
-                mode == ModeGames ? comppack_db_updates->get(item->titleid)
-                          : std::optional<CompPackDatabase::Item>{},
-                    annotation_db.get());
-        else if (mode == ModeThemes || mode == ModeDemos)
-        {
-            pkgi_start_download(downloader, *item);
-        }
-        else if (mode == ModeDlcs)
-        {
-            if (selected_items.empty())
-            {
-                if (downloader.is_in_queue(mode_to_type(mode), item->content))
-                {
-                    downloader.remove_from_queue(mode_to_type(mode), item->content);
-                    item->presence = PresenceUnknown;
-                }
-                else
-                    pkgi_install_package(downloader, item);
-            }
-            else
-            {
-                for(size_t i = 0; i < selected_items.size(); i++)
-                {
-                    if (downloader.is_in_queue(mode_to_type(mode), selected_items[i]->content))
-                    {
-                        downloader.remove_from_queue(mode_to_type(mode), selected_items[i]->content);
-                        selected_items[i]->content = PresenceUnknown;
-                    }
-                    else
-                        pkgi_install_package(downloader, selected_items[i]);
-                }
-                selected_items.clear();
-            }
-                
-        }
-        else 
+        // All modes are ROM modes — no GameView/comppack; directly download
         {
             if (downloader.is_in_queue(mode_to_type(mode), item->content))
             {
@@ -1011,7 +854,7 @@ void pkgi_do_main(Downloader& downloader, pkgi_input* input)
         *
         * Related context: .github/copilot-instructions.md (Annotation Feature section)
         */
-        if (mode == ModeGames || mode == ModePspGames)
+        if (true) // ROM annotation cycling enabled for all modes
         {
             input->pressed &= ~PKGI_BUTTON_S;
             DbItem* item = db->get(selected_item);
@@ -1025,33 +868,21 @@ void pkgi_do_main(Downloader& downloader, pkgi_input* input)
                 annotation_db->set(item->titleid, ann);
             }
         }
-        else if (mode == ModeDlcs) 
-        {
-            input->pressed &= ~PKGI_BUTTON_S;
-            DbItem* item = db->get(selected_item);
-            if(std::find(selected_items.begin(), selected_items.end(), item) != selected_items.end())
-            {
-                selected_items.erase(std::find(selected_items.begin(),selected_items.end(), item));
-            }
-            else if(selected_items.size() < 32 - pkgi_list_dir_contents("ux0:bgdl/t").size())
-            {
-                selected_items.push_back(item);
-            }
-        }
+        // (multi-select DLC batch mode not applicable to ROM systems)
     }
     else if (input && (input->pressed & PKGI_BUTTON_T))
     {
         input->pressed &= ~PKGI_BUTTON_T;
 
         config_temp = config;
-        int allow_refresh = !config.games_url.empty() << 0 |
-                            !config.dlcs_url.empty() << 1 |
-                            !config.demos_url.empty() << 6 |
-                            !config.themes_url.empty() << 5 |
-                            !config.psx_games_url.empty() << 2 |
-                            !config.psp_games_url.empty() << 3 |
-                            !config.psp_dlcs_url.empty() << 7 |
-                            !config.psm_games_url.empty() << 4;
+        int allow_refresh = !config.gb_url.empty()      << 0 |
+                            !config.gbc_url.empty()     << 1 |
+                            !config.gba_url.empty()     << 2 |
+                            !config.snes_url.empty()    << 3 |
+                            !config.nes_url.empty()     << 4 |
+                            !config.genesis_url.empty() << 5 |
+                            !config.ps1_url.empty()     << 6 |
+                            !config.psp_url.empty()     << 7;
         pkgi_menu_start(search_active, &config, allow_refresh);
     }
 }
@@ -1221,11 +1052,6 @@ void pkgi_do_tail(Downloader& downloader)
         pkgi_snprintf(text, sizeof(text), "Idle");
 
     pkgi_draw_text(0, bottom_y, PKGI_COLOR_TEXT_TAIL, text);
-    if (mode == ModeDlcs) 
-    {
-        pkgi_snprintf(text, sizeof(text), "Selected items: %d/%d", selected_items.size(), 32 - pkgi_list_dir_contents("ux0:bgdl/t").size());
-        pkgi_draw_text((VITA_WIDTH - pkgi_text_width(text)) / 2, bottom_y, PKGI_COLOR_TEXT_TAIL, text);
-    }
     const auto second_line = bottom_y + font_height + PKGI_MAIN_ROW_PADDING;
 
     uint32_t count = db->count();
@@ -1241,20 +1067,9 @@ void pkgi_do_tail(Downloader& downloader)
     }
     pkgi_draw_text(0, second_line, PKGI_COLOR_TEXT_TAIL, text);
 
-    // get free space of partition only if looking at psx or psp games else show
-    // ux0:
+    // Always show ux0: free space for ROM modes
     char size[64];
-    if (mode == ModePsxGames || mode == ModePspGames)
-    {
-        pkgi_friendly_size(
-                size,
-                sizeof(size),
-                pkgi_get_free_space(pkgi_get_mode_partition()));
-    }
-    else
-    {
-        pkgi_friendly_size(size, sizeof(size), pkgi_get_free_space("ux0:"));
-    }
+    pkgi_friendly_size(size, sizeof(size), pkgi_get_free_space("ux0:"));
 
     char free[64];
     pkgi_snprintf(free, sizeof(free), "Free: %s", size);
@@ -1284,22 +1099,15 @@ void pkgi_do_tail(Downloader& downloader)
     }
     else
     {
-        if (mode == ModeGames || mode == ModePspGames)
-        {
-            bottom_text += fmt::format("{} details ", pkgi_get_ok_str());
-            bottom_text += PKGI_UTF8_S " flag ";
-        }
-        else
         {
             DbItem* item = db->get(selected_item);
             if (item && item->presence == PresenceInstalling)
                 bottom_text += fmt::format("{} cancel ", pkgi_get_ok_str());
             else if (item && item->presence != PresenceInstalled)
-                bottom_text += fmt::format("{} install ", pkgi_get_ok_str());
+                bottom_text += fmt::format("{} download ", pkgi_get_ok_str());
+            bottom_text += PKGI_UTF8_S " flag ";
         }
         bottom_text += PKGI_UTF8_T " menu ";
-        if (mode == ModeDlcs)
-            bottom_text += PKGI_UTF8_S " select";
     }
 
     pkgi_clip_set(
@@ -1438,96 +1246,31 @@ void pkgi_download_psm_runtime_if_needed() {
 void pkgi_start_download(
     Downloader& downloader,
     const DbItem& item,
-    PspInstallMode psp_install_mode)
+    PspInstallMode /*psp_install_mode*/)
 {
-    LOGF("[{}] {} - starting to install", item.content, item.name);
-
-#ifndef PKGI_SIMULATOR
-    sceIoMkdir("ux0:bgdl", 0777);
-#else
-    pkgi_mkdirs("pkgj/bgdl");
-#endif
+    LOGF("[{}] {} - starting ROM download from Archive.org", item.content, item.name);
 
     try
     {
-        // download PSM Runtime if a PSM game is requested to be installed ..
-#ifndef PKGI_SIMULATOR
-        if(mode == ModePsmGames)
-            pkgi_download_psm_runtime_if_needed();
-#endif
-        // Just use the maximum size to be safe
-        uint8_t rif[PKGI_PSM_RIF_SIZE];
-        char message[256];
-        if (item.zrif.empty() ||
-            pkgi_zrif_decode(item.zrif.c_str(), rif, message, sizeof(message)))
-        {
-            const bool is_pspemudrm_mode = MODE_IS_PSPEMU(mode);
-#ifndef PKGI_SIMULATOR
-            const bool has_psp_bgdl =
-                    is_pspemudrm_mode && pkgi_is_module_present("NoPspEmuDrm_kern");
-            const bool use_psp_bgdl =
-                    is_pspemudrm_mode &&
-                    (psp_install_mode == PspInstallMode::LiveAreaPbp ||
-                     (psp_install_mode == PspInstallMode::Auto && has_psp_bgdl));
-
-            if (psp_install_mode == PspInstallMode::LiveAreaPbp && !has_psp_bgdl)
-                throw std::runtime_error(
-                        "NoPspEmuDrm is required to queue PSP installs in LiveArea");
-
-            if (
-                mode == ModeGames || mode == ModeDlcs || mode == ModeDemos || mode == ModeThemes ||
-                use_psp_bgdl ||
-                (mode == ModePsmGames && pkgi_is_module_present("NoPsmDrm")))
-            {
-                if (is_pspemudrm_mode) {
-                    pkgi_create_psp_rif(item.content, rif);
-                }
-#else // PKGI_SIMULATOR — no bgdl / module checks; always direct download
-            [[maybe_unused]] const bool use_psp_bgdl = false;
-            if (mode == ModeGames || mode == ModeDlcs || mode == ModeDemos || mode == ModeThemes)
-            {
-#endif
-                
-                pkgi_start_bgdl(
-                        mode_to_bgdl_type(mode),
-                        item.name,
-                        item.url,
-                        std::vector<uint8_t>(rif, rif + PKGI_PSM_RIF_SIZE));
-                pkgi_dialog_message(
-                        fmt::format(
-                                "Installation of {} queued in LiveArea",
-                                item.name)
-                                .c_str());
-            }
-            else {
-                downloader.add(DownloadItem{
-                        mode_to_type(mode),
-                        item.name,
-                        item.content,
-                        item.url,
-                        item.zrif.empty()
-                                ? std::vector<uint8_t>{}
-                                : std::vector<uint8_t>(
-                                          rif, rif + PKGI_PSM_RIF_SIZE),
-                        item.has_digest ? std::vector<uint8_t>(
-                                                  item.digest.begin(),
-                                                  item.digest.end())
-                                        : std::vector<uint8_t>{},
-                        is_pspemudrm_mode &&
-                            psp_install_mode != PspInstallMode::LiveAreaPbp,
-                        pkgi_get_mode_partition(),
-                        ""});
-            }
-        }
-        else
-        {
-            pkgi_dialog_error(message);
-        }
+        // All modes are RetroArch ROM modes — add directly to downloader queue.
+        // No bgdl, no zrif/rif decode, no PSN-specific logic.
+        downloader.add(DownloadItem{
+                RomGame,
+                item.name,
+                item.content,
+                item.url,
+                {},    // rif (empty for ROMs)
+                {},    // digest (empty for ROMs)
+                false, // save_as_iso (false for ROMs)
+                pkgi_get_mode_partition(),
+                "",    // version (unused)
+                item.system, // system dir (e.g. "gb", "gba", "snes")
+        });
     }
     catch (const std::exception& e)
     {
         pkgi_dialog_error(
-                fmt::format("Failed to install {}: {}", item.name, e.what())
+                fmt::format("Failed to queue {}: {}", item.name, e.what())
                         .c_str());
     }
 }
@@ -1883,29 +1626,30 @@ int main()
                     case MenuResultBackToBrowse:
                         state = StateBrowse;
                         break;
+                    // RetroArch ROM system mode switching (via browse view / menu)
                     case MenuResultShowGames:
-                        pkgi_set_mode(ModeGames);
+                        pkgi_set_mode(ModeGB);
                         break;
                     case MenuResultShowDlcs:
-                        pkgi_set_mode(ModeDlcs);
+                        pkgi_set_mode(ModeGBC);
                         break;
                     case MenuResultShowDemos:
-                        pkgi_set_mode(ModeDemos);
+                        pkgi_set_mode(ModeGBA);
                         break;
                     case MenuResultShowThemes:
-                        pkgi_set_mode(ModeThemes);
+                        pkgi_set_mode(ModeSNES);
                         break;
                     case MenuResultShowPsmGames:
-                        pkgi_set_mode(ModePsmGames);
+                        pkgi_set_mode(ModeNES);
                         break;
                     case MenuResultShowPsxGames:
-                        pkgi_set_mode(ModePsxGames);
+                        pkgi_set_mode(ModeGenesis);
                         break;
                     case MenuResultShowPspGames:
-                        pkgi_set_mode(ModePspGames);
+                        pkgi_set_mode(ModePS1);
                         break;
                     case MenuResultShowPspDlcs:
-                        pkgi_set_mode(ModePspDlcs);
+                        pkgi_set_mode(ModePSP);
                         break;
                     case MenuResultOpenConfigEditor:
                         config_editor = std::make_unique<ConfigEditor>(config);

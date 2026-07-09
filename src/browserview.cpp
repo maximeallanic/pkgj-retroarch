@@ -38,15 +38,16 @@ extern "C"
 // ---------------------------------------------------------------------------
 static std::vector<BrowseNode> build_tree(const Config& config)
 {
+    // RetroArch ROM systems — Archive.org sources
     auto root = std::vector<BrowseNode>{
-        { "PSV Games",  ModeGames,    {}, "", "" },
-        { "PSV DLCs",   ModeDlcs,     {}, "", "" },
-        { "PSV Themes", ModeThemes,   {}, "", "" },
-        { "PSV Demos",  ModeDemos,    {}, "", "" },
-        { "PSM Games",  ModePsmGames, {}, "", "" },
-        { "PSP Games",  ModePspGames, {}, "", "" },
-        { "PSP DLCs",   ModePspDlcs,  {}, "", "" },
-        { "PS1 Games",  ModePsxGames, {}, "", "" },
+        { "Game Boy",          ModeGB,      {}, "", "" },
+        { "Game Boy Color",    ModeGBC,     {}, "", "" },
+        { "Game Boy Advance",  ModeGBA,     {}, "", "" },
+        { "Super Nintendo",    ModeSNES,    {}, "", "" },
+        { "Nintendo NES",      ModeNES,     {}, "", "" },
+        { "Sega Mega Drive",   ModeGenesis, {}, "", "" },
+        { "PlayStation 1",     ModePS1,     {}, "", "" },
+        { "PSP",               ModePSP,     {}, "", "" },
     };
 
     int custom_number = 1;

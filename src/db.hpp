@@ -53,22 +53,25 @@ enum DbFilter
 struct DbItem
 {
     DbPresence presence;
-    std::string titleid;
-    std::string content;
+    std::string titleid;   // = Archive.org identifier
+    std::string content;   // = Archive.org identifier
     uint32_t flags;
     std::string name;
     std::string name_org;
-    std::string zrif;
-    std::string url;
-    bool has_digest;
-    std::array<uint8_t, 32> digest;
+    std::string zrif;      // always empty for ROMs
+    std::string url;       // Archive.org download URL
+    bool has_digest;       // always false for ROMs
+    std::array<uint8_t, 32> digest; // always empty for ROMs
     int64_t size;
     std::string date;
-    std::string app_version;
-    std::string fw_version;
+    std::string app_version; // unused for ROMs
+    std::string fw_version;  // unused for ROMs
     bool selected;
 
-    // Fetched live from the PlayStation Store (not persisted to DB)
+    // System string (e.g. "gb", "gba", "snes")
+    std::string system;
+
+    // Fetched live (not persisted to DB)
     std::string description;
 
     // Personal annotation (loaded from AnnotationDatabase after reload)
@@ -86,24 +89,23 @@ enum GameRegion
     RegionUnknown,
 };
 
+// RetroArch ROM systems (replaces PSN modes)
 enum Mode
 {
-    ModeGames,
-    ModeDlcs,
-    ModeDemos,
-    ModeThemes,
-    ModePsmGames,
-    ModePsxGames,
-    ModePspGames,
-    ModePspDlcs,
+    ModeGB,       // Game Boy
+    ModeGBC,      // Game Boy Color
+    ModeGBA,      // Game Boy Advance
+    ModeSNES,     // Super Nintendo / SNES
+    ModeNES,      // Nintendo Entertainment System
+    ModeGenesis,  // Sega Mega Drive / Genesis
+    ModePS1,      // PlayStation 1
+    ModePSP,      // PlayStation Portable
 };
-
-#define MODE_IS_PSPEMU(x) \
-    (x == ModePsxGames || x == ModePspGames || x == ModePspDlcs)
 
 static constexpr auto ModeCount = 8;
 
 std::string pkgi_mode_to_string(Mode mode);
+std::string pkgi_mode_to_system_dir(Mode mode);
 
 class TitleDatabase
 {

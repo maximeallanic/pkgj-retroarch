@@ -2,7 +2,6 @@
 
 #include "file.hpp"
 #include "pkgi.hpp"
-#include "sha256.hpp"
 #include "utils.hpp"
 
 #include <fmt/format.h>
@@ -13,6 +12,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <stddef.h>
 
@@ -20,349 +20,191 @@ std::string pkgi_mode_to_string(Mode mode)
 {
     switch (mode)
     {
-#define RET(mode, str) \
-    case Mode##mode:   \
-        return str
-        RET(Games,    "PSV Games");
-        RET(Dlcs,     "PSV DLCs");
-        RET(Themes,   "PSV Themes");
-        RET(Demos,    "PSV Demos");
-        RET(PsmGames, "PSM Games");
-        RET(PspGames, "PSP Games");
-        RET(PspDlcs,  "PSP DLCs");
-        RET(PsxGames, "PS1 Games");
-#undef RET
+    case ModeGB:      return "Game Boy";
+    case ModeGBC:     return "Game Boy Color";
+    case ModeGBA:     return "Game Boy Advance";
+    case ModeSNES:    return "Super Nintendo";
+    case ModeNES:     return "Nintendo NES";
+    case ModeGenesis: return "Sega Mega Drive";
+    case ModePS1:     return "PlayStation 1";
+    case ModePSP:     return "PSP";
     }
-    return "unknown mode";
+    return "unknown system";
+}
+
+// Directory name used under ux0:roms/
+std::string pkgi_mode_to_system_dir(Mode mode)
+{
+    switch (mode)
+    {
+    case ModeGB:      return "gb";
+    case ModeGBC:     return "gbc";
+    case ModeGBA:     return "gba";
+    case ModeSNES:    return "snes";
+    case ModeNES:     return "nes";
+    case ModeGenesis: return "megadrive";
+    case ModePS1:     return "psx";
+    case ModePSP:     return "psp";
+    }
+    return "roms";
 }
 
 TitleDatabase::TitleDatabase(const std::string& dbPath) : _dbPath(dbPath)
 {
 }
 
+// Cache filename per system (pipe-delimited text)
 static const char* pkgi_mode_to_file_name(Mode mode)
 {
     switch (mode)
     {
-    case ModeGames:
-        return "titles_psvgames.tsv";
-    case ModeDlcs:
-        return "titles_psvdlcs.tsv";
-    case ModeDemos:
-        return "titles_psvdemos.tsv";
-    case ModeThemes:
-        return "titles_psvthemes.tsv";
-    case ModePsmGames:
-        return "titles_psmgames.tsv";
-    case ModePspGames:
-        return "titles_pspgames.tsv";
-    case ModePspDlcs:
-        return "titles_pspdlcs.tsv";
-    case ModePsxGames:
-        return "titles_psxgames.tsv";
+    case ModeGB:      return "roms_gb.dat";
+    case ModeGBC:     return "roms_gbc.dat";
+    case ModeGBA:     return "roms_gba.dat";
+    case ModeSNES:    return "roms_snes.dat";
+    case ModeNES:     return "roms_nes.dat";
+    case ModeGenesis: return "roms_genesis.dat";
+    case ModePS1:     return "roms_ps1.dat";
+    case ModePSP:     return "roms_psp.dat";
     }
     throw formatEx<std::runtime_error>(
             "unknown mode {}", static_cast<int>(mode));
 }
 
+// ---------------------------------------------------------------------------
+// Minimal JSON field extractor (no external dependency)
+// Works on a null-terminated JSON substring.
+// ---------------------------------------------------------------------------
 namespace
 {
-std::vector<const char*> pkgi_split_row(char** pptr, const char* end)
+
+// Return the value of a string field "key":"<value>" within [data, data+len)
+static std::string json_str(const char* data, size_t len, const char* key)
 {
-    auto& ptr = *pptr;
+    // Build the search pattern "key":"
+    std::string pat = "\"";
+    pat += key;
+    pat += "\":\"";
 
-    std::vector<const char*> result;
-    while (ptr != end && *ptr != '\n')
+    const char* found = nullptr;
+    for (size_t i = 0; i + pat.size() <= len; ++i)
     {
-        const char* field = ptr;
-        while (ptr != end && *ptr != '\t' && *ptr != '\r')
-            ++ptr;
-        if (ptr == end)
+        if (memcmp(data + i, pat.c_str(), pat.size()) == 0)
         {
-            result.push_back(field);
-            break;
-        }
-        *ptr++ = 0;
-        result.push_back(field);
-
-        if (ptr == end)
-        {
-            result.push_back(field);
+            found = data + i + pat.size();
             break;
         }
     }
-    while (ptr != end && *ptr++ != '\n')
-        ;
+    if (!found)
+        return "";
+
+    const char* end = found;
+    const char* limit = data + len;
+    while (end < limit && *end != '"' && *end != '\0')
+    {
+        if (*end == '\\')
+            end++; // skip escaped char
+        end++;
+    }
+    return std::string(found, end);
+}
+
+// Return the value of a numeric field "key":<number> within [data, data+len)
+static int64_t json_num(const char* data, size_t len, const char* key)
+{
+    std::string pat = "\"";
+    pat += key;
+    pat += "\":";
+
+    const char* found = nullptr;
+    for (size_t i = 0; i + pat.size() <= len; ++i)
+    {
+        if (memcmp(data + i, pat.c_str(), pat.size()) == 0)
+        {
+            found = data + i + pat.size();
+            break;
+        }
+    }
+    if (!found)
+        return 0;
+
+    // skip whitespace
+    while (*found == ' ' || *found == '\t') found++;
+    if (*found < '0' || *found > '9')
+        return 0;
+
+    int64_t result = 0;
+    while (*found >= '0' && *found <= '9')
+    {
+        result = result * 10 + (*found - '0');
+        found++;
+    }
     return result;
 }
 
-enum class Column
+// Find the closing '}' matching an opening '{' at ptr[0].
+// Returns pointer to the '}', or nullptr on error.
+static const char* find_object_end(const char* ptr, const char* limit)
 {
-    Region,
-    Content,
-    Name,
-    NameOrg,
-    AppVersion,
-    Zrif,
-    Url,
-    Digest,
-    Size,
-    FwVersion,
-    LastModification,
-};
-
-int pkgi_get_column_number(Mode mode, Column column)
-{
-#define MAP_COL(name, i) \
-    case Column::name:   \
-        return i
-
-    switch (mode)
+    if (!ptr || *ptr != '{')
+        return nullptr;
+    int depth = 0;
+    bool in_string = false;
+    while (ptr < limit)
     {
-    case ModeGames:
-        switch (column)
+        char c = *ptr;
+        if (in_string)
         {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Zrif, 4);
-            MAP_COL(Content, 5);
-            MAP_COL(LastModification, 6);
-            MAP_COL(NameOrg, 7);
-            MAP_COL(Size, 8);
-            MAP_COL(Digest, 9);
-            MAP_COL(FwVersion, 10);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
+            if (c == '\\')
+                ptr++; // skip escaped char
+            else if (c == '"')
+                in_string = false;
         }
-    case ModeDlcs:
-        switch (column)
+        else
         {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Zrif, 4);
-            MAP_COL(Content, 5);
-            MAP_COL(LastModification, 6);
-            MAP_COL(Size, 7);
-            MAP_COL(Digest, 8);
-            MAP_COL(NameOrg, -1);
-            MAP_COL(FwVersion, -1);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
+            if (c == '"')
+                in_string = true;
+            else if (c == '{')
+                depth++;
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                    return ptr;
+            }
         }
-    case ModeDemos:
-        switch (column)
-        {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Zrif, 4);
-            MAP_COL(Content, 5);
-            MAP_COL(LastModification, 6);
-            MAP_COL(NameOrg, 7);
-            MAP_COL(Size, 8);
-            MAP_COL(Digest, 9);
-            MAP_COL(FwVersion, 10);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
-        }
-    case ModeThemes:
-        switch (column)
-        {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Zrif, 4);
-            MAP_COL(Content, 5);
-            MAP_COL(LastModification, 6);
-            MAP_COL(Size, 7);
-            MAP_COL(Digest, 8);
-            MAP_COL(NameOrg, -1);
-            MAP_COL(FwVersion, -1);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
-        }
-    case ModePsmGames:
-        switch (column)
-        {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Zrif, 4);
-            MAP_COL(Content, 5);
-            MAP_COL(LastModification, 6);
-            MAP_COL(Size, 7);
-            MAP_COL(Digest, 8);
-            MAP_COL(NameOrg, -1);
-            MAP_COL(FwVersion, -1);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
-        }
-    case ModePsxGames:
-        switch (column)
-        {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Content, 4);
-            MAP_COL(LastModification, 5);
-            MAP_COL(NameOrg, 6);
-            MAP_COL(Size, 7);
-            MAP_COL(Digest, 8);
-            MAP_COL(Zrif, -1);
-            MAP_COL(FwVersion, -1);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
-        }
-    case ModePspGames:
-        switch (column)
-        {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 3);
-            MAP_COL(Url, 4);
-            MAP_COL(Content, 5);
-            MAP_COL(LastModification, 6);
-            MAP_COL(Size, 9);
-            MAP_COL(Digest, 10);
-            MAP_COL(FwVersion, -1);
-            MAP_COL(NameOrg, -1);
-            MAP_COL(Zrif, -1);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
-        }
-    case ModePspDlcs:
-        switch (column)
-        {
-            MAP_COL(Region, 1);
-            MAP_COL(Name, 2);
-            MAP_COL(Url, 3);
-            MAP_COL(Content, 4);
-            MAP_COL(LastModification, 5);
-            MAP_COL(Size, 8);
-            MAP_COL(Digest, 9);
-            MAP_COL(FwVersion, -1);
-            MAP_COL(NameOrg, -1);
-            MAP_COL(Zrif, -1);
-            MAP_COL(AppVersion, -1);
-        default:
-            throw std::runtime_error("invalid column");
-        }
-    default:
-        throw std::runtime_error("invalid mode");
+        ptr++;
     }
-#undef MAP_COL
+    return nullptr;
 }
 
-const char* get_or_empty(
-        Mode mode, std::vector<const char*> const& v, Column column)
+// Split a string by delimiter (returns at most maxParts parts)
+static std::vector<std::string> split_pipe(const std::string& s, char delim = '|')
 {
-    const auto pos = pkgi_get_column_number(mode, column);
-    if (pos < 0)
-        return "";
-    return v.at(pos);
-}
-}
-
-void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
-{
-    const auto tmppath = _dbPath + "/dbtmp.tsv";
-    auto item_file = pkgi_create(tmppath);
-    BOOST_SCOPE_EXIT_ALL(&)
+    std::vector<std::string> parts;
+    std::string cur;
+    for (char c : s)
     {
-        if (item_file)
-            pkgi_close(item_file);
-    };
-
-    std::vector<uint8_t> db_data(64 * 1024);
-    db_total = 0;
-    db_size = 0;
-
-    LOGF("Fetching game database from: {}", update_url);
-
-    http->start(update_url, 0);
-
-    db_total = http->get_length();
-
-    for (;;)
-    {
-        int read = http->read(db_data.data(), db_data.size());
-        if (read == 0)
-            break;
-        db_size += read;
-
-        pkgi_write(item_file, db_data.data(), read);
+        if (c == delim)
+        {
+            parts.push_back(cur);
+            cur.clear();
+        }
+        else
+        {
+            cur += c;
+        }
     }
-
-    if (db_size == 0)
-        throw std::runtime_error(
-                "list is empty... check for newer pkgj version");
-    if (db_size != db_total)
-        throw std::runtime_error(
-                "TSV file is truncated, check your Internet connection and "
-                "retry");
-
-    pkgi_close(item_file);
-    item_file = nullptr;
-
-    const auto filepath =
-            fmt::format("{}/{}", _dbPath, pkgi_mode_to_file_name(mode));
-
-    pkgi_rename(tmppath, filepath);
-
-    LOG("Game database download complete");
+    parts.push_back(cur);
+    return parts;
 }
 
-namespace
-{
-const char* region_to_string(GameRegion region)
-{
-    switch (region)
-    {
-    case RegionASA:
-        return "ASIA";
-    case RegionEUR:
-        return "EU";
-    case RegionJPN:
-        return "JP";
-    case RegionUSA:
-        return "US";
-    default:
-        throw std::runtime_error(fmt::format("unknown region {}", (int)region));
-    }
-}
-
-std::set<std::string> filter_to_vector(uint32_t filter)
-{
-    std::set<std::string> ret;
-#define HANDLE_REGION(reg)            \
-    if (filter & DbFilterRegion##reg) \
-    ret.insert(region_to_string(Region##reg))
-    HANDLE_REGION(ASA);
-    HANDLE_REGION(EUR);
-    HANDLE_REGION(JPN);
-    HANDLE_REGION(USA);
-#undef HANDLE_REGION
-    return ret;
-}
-
+// Sorting helper
 bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
 {
-    GameRegion reg_a = pkgi_get_region(a.titleid);
-    GameRegion reg_b = pkgi_get_region(b.titleid);
-
     int64_t cmp;
     if (sort == SortByTitle)
         cmp = a.titleid.compare(b.titleid);
-    else if (sort == SortByRegion)
-        cmp = reg_a - reg_b;
     else if (sort == SortByName)
         cmp = pkgi_stricmp(a.name.c_str(), b.name.c_str());
     else if (sort == SortBySize)
@@ -370,8 +212,7 @@ bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
     else if (sort == SortByDate)
         cmp = a.date.compare(b.date);
     else
-        throw std::runtime_error(
-                fmt::format("unknown sort order {}", (int)sort));
+        cmp = pkgi_stricmp(a.name.c_str(), b.name.c_str());
 
     if (cmp == 0)
         cmp = a.titleid.compare(b.titleid);
@@ -381,20 +222,139 @@ bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
 
     return cmp < 0;
 }
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// update() — Download Archive.org search results and cache locally
+// URL format: https://archive.org/advancedsearch.php?q=collection:...&output=json&...
+// ---------------------------------------------------------------------------
+void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
+{
+    db_total = 0;
+    db_size = 0;
+
+    LOGF("Fetching ROM list from Archive.org: {}", update_url);
+
+    http->start(update_url, 0);
+
+    const auto http_length = http->get_length();
+    db_total = (http_length > 0) ? static_cast<uint32_t>(http_length) : 0;
+
+    // Read the full JSON response into memory
+    std::vector<char> json_buf;
+    json_buf.reserve(256 * 1024);
+
+    std::vector<uint8_t> chunk(32 * 1024);
+    for (;;)
+    {
+        int read = http->read(chunk.data(), chunk.size());
+        if (read <= 0)
+            break;
+        db_size += static_cast<uint32_t>(read);
+        json_buf.insert(json_buf.end(),
+                        reinterpret_cast<char*>(chunk.data()),
+                        reinterpret_cast<char*>(chunk.data()) + read);
+    }
+
+    if (json_buf.empty())
+        throw std::runtime_error("Archive.org returned empty response");
+
+    json_buf.push_back('\0'); // null-terminate
+
+    const char* json = json_buf.data();
+    const size_t json_len = json_buf.size() - 1;
+
+    // Locate the "docs":[ array
+    const char* docs_key = "\"docs\":[";
+    const char* docs_start = nullptr;
+    for (size_t i = 0; i + strlen(docs_key) <= json_len; ++i)
+    {
+        if (memcmp(json + i, docs_key, strlen(docs_key)) == 0)
+        {
+            docs_start = json + i + strlen(docs_key);
+            break;
+        }
+    }
+
+    if (!docs_start)
+        throw std::runtime_error("Archive.org JSON missing 'docs' array");
+
+    const char* json_end = json + json_len;
+
+    // Write cache file (pipe-delimited: identifier|title|date|size)
+    const auto filepath =
+            fmt::format("{}/{}", _dbPath, pkgi_mode_to_file_name(mode));
+    const auto tmppath = _dbPath + "/dbtmp.dat";
+
+    auto item_file = pkgi_create(tmppath);
+    if (!item_file)
+        throw formatEx<std::runtime_error>(
+                "cannot create cache file {}", tmppath);
+
+    BOOST_SCOPE_EXIT_ALL(&)
+    {
+        if (item_file)
+            pkgi_close(item_file);
+    };
+
+    uint32_t count = 0;
+    const char* p = docs_start;
+    while (p < json_end && *p != ']')
+    {
+        if (*p == '{')
+        {
+            const char* obj_end = find_object_end(p, json_end);
+            if (!obj_end)
+                break;
+
+            const size_t obj_len = static_cast<size_t>(obj_end - p + 1);
+
+            const std::string identifier = json_str(p, obj_len, "identifier");
+            const std::string title      = json_str(p, obj_len, "title");
+            const std::string addeddate  = json_str(p, obj_len, "addeddate");
+            const int64_t     item_size  = json_num(p, obj_len, "item_size");
+
+            if (!identifier.empty())
+            {
+                const std::string line = identifier + "|" +
+                                         title      + "|" +
+                                         addeddate  + "|" +
+                                         std::to_string(item_size) + "\n";
+                pkgi_write(item_file, line.data(), static_cast<uint32_t>(line.size()));
+                count++;
+            }
+
+            p = obj_end + 1;
+        }
+        else
+        {
+            p++;
+        }
+
+        if (count >= MAX_DB_ITEMS)
+            break;
+    }
+
+    pkgi_close(item_file);
+    item_file = nullptr;
+
+    pkgi_rename(tmppath, filepath);
+
+    LOGF("Archive.org database cached: {} items → {}", count, filepath);
 }
 
+// ---------------------------------------------------------------------------
+// reload() — Read cached pipe-delimited file and populate db
+// ---------------------------------------------------------------------------
 void TitleDatabase::reload(
         Mode mode,
-        uint32_t region_filter,
+        uint32_t /*region_filter*/,
         DbSort sort_by,
         DbSortOrder sort_order,
         const std::string& search,
-        const std::set<std::string>& installed_games)
+        const std::set<std::string>& /*installed_games*/)
 {
-    const auto filter_by_region =
-            (region_filter & DbFilterAllRegions) != DbFilterAllRegions;
-    const auto regions = filter_to_vector(region_filter);
-
     db.clear();
     _title_count = 0;
 
@@ -405,101 +365,99 @@ void TitleDatabase::reload(
         return;
 
     auto db_data = pkgi_load(dbpath);
+    if (db_data.empty())
+        return;
+
+    const std::string sys_dir = pkgi_mode_to_system_dir(mode);
 
     auto ptr = reinterpret_cast<char*>(db_data.data());
-    const auto end = reinterpret_cast<char*>(db_data.data() + db_data.size());
+    const auto data_end = reinterpret_cast<char*>(db_data.data() + db_data.size());
 
-    // skip header
-    while (ptr < end && *ptr != '\n')
-        ptr++;
-    if (ptr == end)
-        return;
-    ptr++; // \n
-
-    unsigned line = 1;
-    while (ptr < end && *ptr)
+    unsigned line_num = 0;
+    while (ptr < data_end)
     {
-        ++line;
+        ++line_num;
+
+        // Find end of line
+        char* line_end = ptr;
+        while (line_end < data_end && *line_end != '\n' && *line_end != '\r')
+            line_end++;
+
+        if (line_end == ptr)
+        {
+            // skip empty line
+            while (ptr < data_end && (*ptr == '\n' || *ptr == '\r'))
+                ptr++;
+            continue;
+        }
+
+        std::string line(ptr, line_end);
+
+        // advance past newline(s)
+        ptr = line_end;
+        while (ptr < data_end && (*ptr == '\n' || *ptr == '\r'))
+            ptr++;
+
         try
         {
-            const auto fields = pkgi_split_row(&ptr, end);
+            const auto fields = split_pipe(line);
+            if (fields.size() < 2)
+                continue;
 
-            const std::string content =
-                    get_or_empty(mode, fields, Column::Content);
-            const std::string titleid =
-                    content.size() >= 7 + 9 ? content.substr(7, 9) : "";
-            const auto region = get_or_empty(mode, fields, Column::Region);
-            const std::string name = get_or_empty(mode, fields, Column::Name);
-            const auto name_org = get_or_empty(mode, fields, Column::NameOrg);
-            const auto url = get_or_empty(mode, fields, Column::Url);
-            const auto zrif = get_or_empty(mode, fields, Column::Zrif);
-            const auto digest = get_or_empty(mode, fields, Column::Digest);
-            const std::string size = get_or_empty(mode, fields, Column::Size);
-            const std::string fw_version =
-                    get_or_empty(mode, fields, Column::FwVersion);
-            const auto last_modification =
-                    get_or_empty(mode, fields, Column::LastModification);
-            const std::string app_version =
-                    get_or_empty(mode, fields, Column::AppVersion);
+            const std::string& identifier = fields[0];
+            const std::string& title      = fields[1];
+            const std::string  date  = (fields.size() > 2) ? fields[2] : "";
+            int64_t size_val = 0;
+            if (fields.size() > 3 && !fields[3].empty())
+            {
+                try { size_val = std::stoll(fields[3]); }
+                catch (...) { size_val = 0; }
+            }
 
-            if (*url == '\0' || std::string(url) == "MISSING" ||
-                std::string(url) == "CART ONLY" ||
-                std::string(zrif) == "MISSING")
+            if (identifier.empty())
                 continue;
 
             ++_title_count;
 
-            if (filter_by_region && !regions.count(region))
-                continue;
-
+            // Apply search filter
             if (!search.empty() &&
-                !pkgi_stricontains(name.c_str(), search.c_str()) &&
-                !pkgi_stricontains(titleid.c_str(), search.c_str()))
+                !pkgi_stricontains(title.c_str(), search.c_str()) &&
+                !pkgi_stricontains(identifier.c_str(), search.c_str()))
                 continue;
 
-            bool bdigest = true;
-            std::array<uint8_t, 32> digest_array{};
-            if (std::all_of(
-                        digest,
-                        digest + 64,
-                        [](const auto c) { return c != 0; }))
-                digest_array = pkgi_hexbytes(digest, SHA256_DIGEST_SIZE);
-            else
-                bdigest = false;
+            // Construct Archive.org direct download URL
+            // Pattern: https://archive.org/download/<id>/<id>.zip
+            const std::string url = "https://archive.org/download/" +
+                                    identifier + "/" + identifier + ".zip";
 
-            std::string full_name = name;
-            if (!app_version.empty())
-                full_name = fmt::format("{} ({})", name, app_version);
-            if (!name.empty() && name.back() != ']' && fw_version > "3.60")
-                full_name = fmt::format("{} [{}]", full_name, fw_version);
+            if (db.size() >= MAX_DB_ITEMS)
+                break;
 
-            if (!(region_filter & DbFilterInstalled) ||
-                installed_games.find(titleid) != installed_games.end())
-                db.push_back(DbItem{
-                        PresenceUnknown,
-                        titleid,
-                        content,
-                        0,
-                        full_name,
-                        name_org ? name_org : "",
-                        zrif ? zrif : "",
-                        url,
-                        static_cast<bool>(bdigest),
-                        digest_array,
-                        size.empty() ? 0 : std::stoll(size),
-                        last_modification,
-                        app_version,
-                        fw_version,
-                        /*selected=*/false,
-                        /*description=*/"",
-                        /*user_flag=*/UserFlag::None,
-                        /*user_comment=*/"",
-                });
+            db.push_back(DbItem{
+                    /*presence=*/PresenceUnknown,
+                    /*titleid=*/identifier,
+                    /*content=*/identifier,
+                    /*flags=*/0,
+                    /*name=*/title.empty() ? identifier : title,
+                    /*name_org=*/"",
+                    /*zrif=*/"",
+                    /*url=*/url,
+                    /*has_digest=*/false,
+                    /*digest=*/{},
+                    /*size=*/size_val,
+                    /*date=*/date,
+                    /*app_version=*/"",
+                    /*fw_version=*/"",
+                    /*selected=*/false,
+                    /*system=*/sys_dir,
+                    /*description=*/"",
+                    /*user_flag=*/UserFlag::None,
+                    /*user_comment=*/"",
+            });
         }
         catch (const std::exception& e)
         {
-            throw formatEx<std::runtime_error>(
-                    "failed to parse line {}: {}", line, e.what());
+            LOGFW("Failed to parse line {}: {}", line_num, e.what());
         }
     }
 
@@ -515,7 +473,7 @@ void TitleDatabase::reload(
 void TitleDatabase::get_update_status(uint32_t* updated, uint32_t* total)
 {
     *updated = db_size;
-    *total = db_total;
+    *total   = db_total;
 }
 
 uint32_t TitleDatabase::count()
@@ -530,7 +488,7 @@ uint32_t TitleDatabase::total()
 
 DbItem* TitleDatabase::get(uint32_t index)
 {
-    return index < db.size() ? &db[index] : NULL;
+    return index < db.size() ? &db[index] : nullptr;
 }
 
 DbItem* TitleDatabase::get_by_content(const char* content)
@@ -538,85 +496,11 @@ DbItem* TitleDatabase::get_by_content(const char* content)
     for (size_t i = 0; i < db.size(); ++i)
         if (db[i].content == content)
             return &db[i];
-    return NULL;
+    return nullptr;
 }
 
-GameRegion pkgi_get_region(const std::string& titleid)
+// Keep this for any remaining callers (e.g. browserview sort)
+GameRegion pkgi_get_region(const std::string& /*titleid*/)
 {
-    if (titleid.size() < 4)
-        return RegionUnknown;
-
-    uint32_t first = get32le((uint8_t*)titleid.c_str());
-
-#define ID(a, b, c, d)                                    \
-    (uint32_t)(                                           \
-            ((uint8_t)(d) << 24) | ((uint8_t)(c) << 16) | \
-            ((uint8_t)(b) << 8) | ((uint8_t)(a)))
-
-    // https://github.com/Yoti/pkg2zip/blob/master/pkg2zip.c#L241
-    switch (first)
-    {
-    case ID('N', 'P', 'H', 'I'): // PS1
-    case ID('N', 'P', 'H', 'J'): // PS1
-    case ID('N', 'P', 'H', 'G'): // PSP
-    case ID('N', 'P', 'H', 'H'): // PSP
-    case ID('N', 'P', 'H', 'Z'): // PSP
-    case ID('U', 'C', 'A', 'S'): // PSP
-    case ID('U', 'L', 'A', 'S'): // PSP
-    case ID('U', 'C', 'K', 'S'): // PSP KOR
-    case ID('U', 'L', 'K', 'S'): // PSP KOR
-    case ID('P', 'C', 'S', 'D'): // PSV
-    case ID('P', 'C', 'S', 'H'): // PSV
-    case ID('N', 'P', 'Q', 'A'): // PSM
-        return RegionASA;
-
-    case ID('N', 'P', 'E', 'E'): // PS1
-    case ID('N', 'P', 'E', 'F'): // PS1
-    case ID('N', 'P', 'E', 'G'): // PSP
-    case ID('N', 'P', 'E', 'H'): // PSP
-    case ID('N', 'P', 'E', 'X'): // PSP
-    case ID('N', 'P', 'E', 'Z'): // PSP
-    case ID('U', 'C', 'E', 'S'): // PSP
-    case ID('U', 'L', 'E', 'S'): // PSP
-    case ID('P', 'C', 'S', 'B'): // PSV
-    case ID('P', 'C', 'S', 'F'): // PSV
-    case ID('N', 'P', 'O', 'A'): // PSM
-        return RegionEUR;
-
-    case ID('N', 'P', 'J', 'I'): // PS1
-    case ID('N', 'P', 'J', 'J'): // PS1 (1-790) and PSP-PCE (30000-30059)
-    case ID('N', 'P', 'J', 'G'): // PSP
-    case ID('N', 'P', 'J', 'H'): // PSP
-    case ID('U', 'C', 'J', 'B'): // PSP
-    case ID('U', 'C', 'J', 'M'): // PSP
-    case ID('U', 'C', 'J', 'S'): // PSP
-    case ID('U', 'L', 'J', 'M'): // PSP
-    case ID('U', 'L', 'J', 'S'): // PSP
-    case ID('P', 'C', 'S', 'C'): // PSV
-    case ID('P', 'C', 'S', 'G'): // PSV
-    case ID('N', 'P', 'P', 'A'): // PSM
-        return RegionJPN;
-
-    case ID('N', 'P', 'U', 'F'): // PS1 (1-686) and PSP-PCE (30000-30016)
-    case ID('N', 'P', 'U', 'I'): // PS1
-    case ID('N', 'P', 'U', 'J'): // PS1
-    case ID('N', 'P', 'U', 'G'): // PSP
-    case ID('N', 'P', 'U', 'H'): // PSP
-    case ID('N', 'P', 'U', 'X'): // PSP
-    case ID('N', 'P', 'U', 'Z'): // PSP
-    case ID('U', 'C', 'U', 'S'): // PSP
-    case ID('U', 'L', 'U', 'S'): // PSP
-    case ID('P', 'C', 'S', 'A'): // PSV
-    case ID('P', 'C', 'S', 'E'): // PSV
-    case ID('N', 'P', 'N', 'A'): // PSM
-        return RegionUSA;
-
-    case ID('N', 'P', 'X', 'S'): // PSV
-    case ID('P', 'C', 'S', 'I'): // PSV
-        return RegionINT;
-
-    default:
-        return RegionUnknown;
-    }
-#undef ID
+    return RegionUnknown;
 }

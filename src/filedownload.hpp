@@ -23,6 +23,9 @@ public:
             const std::string& titleid,
             const std::string& url);
 
+    // Download directly to an explicit destination path
+    void download_to(const std::string& dest_path, const std::string& url);
+
 private:
     std::string root;
 

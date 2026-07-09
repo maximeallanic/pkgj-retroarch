@@ -49,8 +49,22 @@ int extract(int argc, char* argv[])
 
 Mode arg_to_mode(std::string const& arg)
 {
-    if (arg == "PSVGAMES")
-        return ModeGames;
+    if (arg == "GB" || arg == "PSVGAMES")
+        return ModeGB;
+    else if (arg == "GBC")
+        return ModeGBC;
+    else if (arg == "GBA")
+        return ModeGBA;
+    else if (arg == "SNES")
+        return ModeSNES;
+    else if (arg == "NES")
+        return ModeNES;
+    else if (arg == "GENESIS" || arg == "MD")
+        return ModeGenesis;
+    else if (arg == "PS1" || arg == "PSX")
+        return ModePS1;
+    else if (arg == "PSP")
+        return ModePSP;
     else
         throw std::runtime_error("unsupported arg: " + arg);
 }

@@ -104,3 +104,17 @@ void FileDownload::download(
 
     download_file();
 }
+
+void FileDownload::download_to(
+        const std::string& dest_path,
+        const std::string& url)
+{
+    root = dest_path;
+    LOGF("Downloading to: {}", root);
+
+    download_size = 0;
+    download_offset = 0;
+    download_url = url;
+
+    download_file();
+}

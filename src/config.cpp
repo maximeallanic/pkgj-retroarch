@@ -9,116 +9,107 @@
 #include "file.hpp"
 #include "pkgi.hpp"
 
-static constexpr char default_psv_games_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x56, 0x5f, 0x47,
-	0x41, 0x4d, 0x45, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-static constexpr char default_psv_dlcs_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x56, 0x5f, 0x44,
-	0x4c, 0x43, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-static constexpr char default_psv_demos_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x56, 0x5f, 0x44,
-	0x45, 0x4d, 0x4f, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-static constexpr char default_psv_themes_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x56, 0x5f, 0x54,
-	0x48, 0x45, 0x4d, 0x45, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-static constexpr char default_psx_games_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x58, 0x5f, 0x47,
-	0x41, 0x4d, 0x45, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-static constexpr char default_psp_games_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x50, 0x5f, 0x47,
-	0x41, 0x4d, 0x45, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-static constexpr char default_psp_dlcs_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x50, 0x5f, 0x44,
-	0x4c, 0x43, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-/*
-// legacy NoPayStation
-static constexpr char default_psm_games_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6e, 0x6f, 0x70, 0x61,
-	0x79, 0x73, 0x74, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x73, 0x76, 0x2f, 0x50, 0x53, 0x4d, 0x5f, 0x47,
-	0x41, 0x4d, 0x45, 0x53, 0x2e, 0x74, 0x73, 0x76, 0x00};
-*/
-// modern PSM Reborn
-static constexpr char default_psm_games_url[] = {
-	0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x70, 0x73, 0x6d, 0x72,
-	0x65, 0x62, 0x6f, 0x72, 0x6e, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74,
-	0x73, 0x76, 0x2e, 0x70, 0x68, 0x70, 0x00};
+// Default Archive.org collection search URLs (overridable in config.txt)
+// Format: advancedsearch.php returns JSON with response.docs[]
+// fl[]: fields to return per item (identifier, title, addeddate, item_size)
+
+static const char default_gb_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3AGameBoy"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_gbc_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3AGameBoyColor"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_gba_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3AGameBoyAdvance"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_snes_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3ASuper-Nintendo-Entertainment-System-SNESemu"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_nes_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3ANintendo-Entertainment-System-NES"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_genesis_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3ASega-Mega-Drive---Genesis-ROMs"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_ps1_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3ANo-Intro_Sony_PlayStation"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+static const char default_psp_url[] =
+    "https://archive.org/advancedsearch.php"
+    "?q=collection%3ANo-Intro_Sony_PlayStation_Portable"
+    "&output=json&rows=500"
+    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
+    "&sort[]=title+asc";
+
+// Comppack URL is unused for ROM mode but kept to avoid build errors
 static constexpr char default_comppack_url[] = {0};
 
 static char* skipnonws(char* text, char* end)
 {
     while (text < end && *text != ' ' && *text != '\n' && *text != '\r')
-    {
         text++;
-    }
     return text;
 }
 
 static char* skipws(char* text, char* end)
 {
     while (text < end && (*text == ' ' || *text == '\n' || *text == '\r'))
-    {
         text++;
-    }
     return text;
 }
 
 static DbSort parse_sort(const char* value, DbSort sort)
 {
     if (pkgi_stricmp(value, "title") == 0)
-    {
         return SortByTitle;
-    }
     else if (pkgi_stricmp(value, "region") == 0)
-    {
         return SortByRegion;
-    }
     else if (pkgi_stricmp(value, "name") == 0)
-    {
         return SortByName;
-    }
     else if (pkgi_stricmp(value, "size") == 0)
-    {
         return SortBySize;
-    }
     else if (pkgi_stricmp(value, "date") == 0)
-    {
         return SortByDate;
-    }
     else
-    {
         return sort;
-    }
 }
 
 static DbSortOrder parse_order(const char* value, DbSortOrder order)
 {
     if (pkgi_stricmp(value, "asc") == 0)
-    {
         return SortAscending;
-    }
     else if (pkgi_stricmp(value, "desc") == 0)
-    {
         return SortDescending;
-    }
     else
-    {
         return order;
-    }
 }
 
 static DbFilter parse_filter(char* value, uint32_t filter)
@@ -133,29 +124,17 @@ static DbFilter parse_filter(char* value, uint32_t filter)
         {
             *value = 0;
             if (pkgi_stricmp(start, "ASA") == 0)
-            {
                 result |= DbFilterRegionASA;
-            }
             else if (pkgi_stricmp(start, "EUR") == 0)
-            {
                 result |= DbFilterRegionEUR;
-            }
             else if (pkgi_stricmp(start, "JPN") == 0)
-            {
                 result |= DbFilterRegionJPN;
-            }
             else if (pkgi_stricmp(start, "USA") == 0)
-            {
                 result |= DbFilterRegionUSA;
-            }
             else
-            {
                 return static_cast<DbFilter>(filter);
-            }
             if (ch == 0)
-            {
                 break;
-            }
             value++;
             start = value;
         }
@@ -164,22 +143,16 @@ static DbFilter parse_filter(char* value, uint32_t filter)
             value++;
         }
     }
-
     return static_cast<DbFilter>(result);
 }
 
 static int parse_custom_index(const char* key)
 {
-    if (pkgi_stricmp(key, "custom1") == 0)
-        return 0;
-    if (pkgi_stricmp(key, "custom2") == 0)
-        return 1;
-    if (pkgi_stricmp(key, "custom3") == 0)
-        return 2;
-    if (pkgi_stricmp(key, "custom4") == 0)
-        return 3;
-    if (pkgi_stricmp(key, "custom5") == 0)
-        return 4;
+    if (pkgi_stricmp(key, "custom1") == 0) return 0;
+    if (pkgi_stricmp(key, "custom2") == 0) return 1;
+    if (pkgi_stricmp(key, "custom3") == 0) return 2;
+    if (pkgi_stricmp(key, "custom4") == 0) return 3;
+    if (pkgi_stricmp(key, "custom5") == 0) return 4;
     return -1;
 }
 
@@ -240,26 +213,27 @@ Config pkgi_load_config()
     try
     {
         Config config{};
-        config.no_version_check = 0;  // update check enabled: points to toaster-code/pkgj
+        config.no_version_check = 0;
 
-        config.games_url = default_psv_games_url;
-        config.dlcs_url = default_psv_dlcs_url;
-        config.demos_url = default_psv_demos_url;
-        config.themes_url = default_psv_themes_url;
-        config.psm_games_url = default_psm_games_url;
-        config.psx_games_url = default_psx_games_url;
-        config.psp_games_url = default_psp_games_url;
-        config.psp_dlcs_url = default_psp_dlcs_url;
-        config.comppack_url = default_comppack_url;
+        // Default Archive.org URLs
+        config.gb_url      = default_gb_url;
+        config.gbc_url     = default_gbc_url;
+        config.gba_url     = default_gba_url;
+        config.snes_url    = default_snes_url;
+        config.nes_url     = default_nes_url;
+        config.genesis_url = default_genesis_url;
+        config.ps1_url     = default_ps1_url;
+        config.psp_url     = default_psp_url;
+        config.comppack_url = "";
         config.thumbnail_url = "";
         config.thumbnail_folder = "";
         config.thumbnail_size = 2;
-        config.sort = SortByName;
-        config.order = SortAscending;
+        config.sort   = SortByName;
+        config.order  = SortAscending;
         config.filter = DbFilterAll;
         config.install_psp_psx_location = "ux0:";
 
-        auto const path =
+        const auto path =
                 fmt::format("{}/config.txt", pkgi_get_config_folder());
         LOGF("Config file path: {}", path);
 
@@ -309,23 +283,23 @@ Config pkgi_load_config()
 
             text = skipws(text, end);
 
-            if (pkgi_stricmp(key, "url") == 0 ||
-                pkgi_stricmp(key, "url_games") == 0)
-                config.games_url = value;
-            else if (pkgi_stricmp(key, "url_dlcs") == 0)
-                config.dlcs_url = value;
-            else if (pkgi_stricmp(key, "url_psv_demos") == 0)
-                config.demos_url = value;
-            else if (pkgi_stricmp(key, "url_psv_themes") == 0)
-                config.themes_url = value;
-            else if (pkgi_stricmp(key, "url_psm_games") == 0)
-                config.psm_games_url = value;
-            else if (pkgi_stricmp(key, "url_psx_games") == 0)
-                config.psx_games_url = value;
-            else if (pkgi_stricmp(key, "url_psp_games") == 0)
-                config.psp_games_url = value;
-            else if (pkgi_stricmp(key, "url_psp_dlcs") == 0)
-                config.psp_dlcs_url = value;
+            // RetroArch system URL keys
+            if (pkgi_stricmp(key, "url_gb") == 0)
+                config.gb_url = value;
+            else if (pkgi_stricmp(key, "url_gbc") == 0)
+                config.gbc_url = value;
+            else if (pkgi_stricmp(key, "url_gba") == 0)
+                config.gba_url = value;
+            else if (pkgi_stricmp(key, "url_snes") == 0)
+                config.snes_url = value;
+            else if (pkgi_stricmp(key, "url_nes") == 0)
+                config.nes_url = value;
+            else if (pkgi_stricmp(key, "url_genesis") == 0)
+                config.genesis_url = value;
+            else if (pkgi_stricmp(key, "url_ps1") == 0)
+                config.ps1_url = value;
+            else if (pkgi_stricmp(key, "url_psp") == 0)
+                config.psp_url = value;
             else if (pkgi_stricmp(key, "url_comppack") == 0)
                 config.comppack_url = value;
             else if (pkgi_stricmp(key, "thumbnail_url") == 0)
@@ -333,8 +307,8 @@ Config pkgi_load_config()
             else if (pkgi_stricmp(key, "thumbnail_folder") == 0)
                 config.thumbnail_folder = value;
             else if (pkgi_stricmp(key, "thumbnail_size") == 0)
-                config.thumbnail_size = static_cast<int>(
-                        std::strtol(value, nullptr, 10));
+                config.thumbnail_size =
+                        static_cast<int>(std::strtol(value, nullptr, 10));
             else if (pkgi_stricmp(key, "sort") == 0)
                 config.sort = parse_sort(value, SortByName);
             else if (pkgi_stricmp(key, "order") == 0)
@@ -359,16 +333,11 @@ static const char* sort_str(DbSort sort)
 {
     switch (sort)
     {
-    case SortByTitle:
-        return "title";
-    case SortByRegion:
-        return "region";
-    case SortByName:
-        return "name";
-    case SortBySize:
-        return "size";
-    case SortByDate:
-        return "date";
+    case SortByTitle: return "title";
+    case SortByRegion: return "region";
+    case SortByName: return "name";
+    case SortBySize: return "size";
+    case SortByDate: return "date";
     }
     return "";
 }
@@ -377,10 +346,8 @@ static const char* order_str(DbSortOrder order)
 {
     switch (order)
     {
-    case SortAscending:
-        return "asc";
-    case SortDescending:
-        return "desc";
+    case SortAscending:  return "asc";
+    case SortDescending: return "desc";
     }
     return "";
 }
@@ -389,23 +356,20 @@ void pkgi_save_config(const Config& config)
 {
     char data[4096];
     int len = 0;
-#define SAVE_CONF(configstr, configname, defaultname)                   \
-    if (!config.configname.empty() && config.configname != defaultname) \
-        len += pkgi_snprintf(                                           \
-                data + len,                                             \
-                sizeof(data) - len,                                     \
-                configstr " %s\n",                                      \
-                config.configname.c_str());
-    SAVE_CONF("url_games", games_url, default_psv_games_url)
-    SAVE_CONF("url_dlcs", dlcs_url, default_psv_dlcs_url)
-    SAVE_CONF("url_psv_demos", demos_url, default_psv_demos_url)
-    SAVE_CONF("url_psv_themes", themes_url, default_psv_themes_url)
-    SAVE_CONF("url_psm_games", psm_games_url, default_psm_games_url)
-    SAVE_CONF("url_psx_games", psx_games_url, default_psx_games_url)
-    SAVE_CONF("url_psp_games", psp_games_url, default_psp_games_url)
-    SAVE_CONF("url_psp_dlcs", psp_dlcs_url, default_psp_dlcs_url)
-    SAVE_CONF("url_comppack", comppack_url, default_comppack_url)
-#undef SAVE_CONF
+#define SAVE_URL(key, field, def)                             \
+    if (!config.field.empty() && config.field != def)        \
+        len += pkgi_snprintf(data + len, sizeof(data) - len, \
+                             key " %s\n", config.field.c_str());
+    SAVE_URL("url_gb",      gb_url,      default_gb_url)
+    SAVE_URL("url_gbc",     gbc_url,     default_gbc_url)
+    SAVE_URL("url_gba",     gba_url,     default_gba_url)
+    SAVE_URL("url_snes",    snes_url,    default_snes_url)
+    SAVE_URL("url_nes",     nes_url,     default_nes_url)
+    SAVE_URL("url_genesis", genesis_url, default_genesis_url)
+    SAVE_URL("url_ps1",     ps1_url,     default_ps1_url)
+    SAVE_URL("url_psp",     psp_url,     default_psp_url)
+#undef SAVE_URL
+
     for (size_t i = 0; i < config.custom_entries.size(); i++)
     {
         const auto& entry = config.custom_entries[i];
@@ -432,11 +396,10 @@ void pkgi_save_config(const Config& config)
                 "thumbnail_folder %s\n",
                 config.thumbnail_folder.c_str());
     len += pkgi_snprintf(
-            data + len,
-            sizeof(data) - len,
-            "thumbnail_size %d\n",
-            config.thumbnail_size);
-    if (!config.install_psp_psx_location.empty())
+            data + len, sizeof(data) - len,
+            "thumbnail_size %d\n", config.thumbnail_size);
+    if (!config.install_psp_psx_location.empty() &&
+        config.install_psp_psx_location != "ux0:")
         len += pkgi_snprintf(
                 data + len,
                 sizeof(data) - len,
@@ -445,10 +408,10 @@ void pkgi_save_config(const Config& config)
     len += pkgi_snprintf(
             data + len, sizeof(data) - len, "sort %s\n", sort_str(config.sort));
     len += pkgi_snprintf(
-            data + len,
-            sizeof(data) - len,
-            "order %s\n",
-            order_str(config.order));
+            data + len, sizeof(data) - len,
+            "order %s\n", order_str(config.order));
+
+    // Write filter
     len += pkgi_snprintf(data + len, sizeof(data) - len, "filter ");
     const char* sep = "";
     if (config.filter & DbFilterRegionASA)
@@ -473,12 +436,6 @@ void pkgi_save_config(const Config& config)
     }
     len += pkgi_snprintf(data + len, sizeof(data) - len, "\n");
 
-    if (config.no_version_check)
-    {
-        len += pkgi_snprintf(
-                data + len, sizeof(data) - len, "no_version_check 1\n");
-    }
-
-    pkgi_save(
-            fmt::format("{}/config.txt", pkgi_get_config_folder()), data, len);
+    const auto path = fmt::format("{}/config.txt", pkgi_get_config_folder());
+    pkgi_save(path, data, len);
 }

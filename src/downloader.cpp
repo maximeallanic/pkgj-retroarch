@@ -32,6 +32,8 @@ std::string type_to_string(Type type)
         return "Base Comp Pack";
     case Type::CompPackPatch:
         return "Patch Comp Pack";
+    case Type::RomGame:
+        return "ROM";
     }
     return "unknown";
 }
@@ -235,10 +237,54 @@ void Downloader::do_download_comppack(const DownloadItem& item)
     LOG("Comppack install complete: %s", item.name.c_str());
 }
 
+void Downloader::do_download_rom(const DownloadItem& item)
+{
+    BOOST_SCOPE_EXIT_ALL(&)
+    {
+        refresh(item.content);
+    };
+
+    ScopeProcessLock _;
+    LOGF("[ROM] Download started: {} (system: {})", item.name, item.system);
+
+    // Derive filename from URL (last path component)
+    std::string filename = item.content + ".zip";
+    const auto slash_pos = item.url.rfind('/');
+    if (slash_pos != std::string::npos && slash_pos + 1 < item.url.size())
+        filename = item.url.substr(slash_pos + 1);
+
+    // Temp path during download
+    const std::string temp_path =
+            fmt::format("{}pkgj/{}.rom_dl", item.partition, item.content);
+
+    // Ensure pkgj temp dir exists
+    pkgi_mkdirs(fmt::format("{}pkgj", item.partition).c_str());
+
+    auto fdl = std::make_unique<FileDownload>(std::make_unique<VitaHttp>());
+    fdl->update_progress_cb =
+            [this](uint64_t offset, uint64_t total)
+    {
+        _download_offset = offset;
+        _download_size   = total;
+    };
+    fdl->is_canceled = [this] { return _cancel_current || _dying; };
+
+    fdl->download_to(temp_path, item.url);
+
+    LOGF("[ROM] Download complete: {}", item.name);
+
+    // Move to final destination ux0:roms/<system>/<filename>
+    pkgi_install_rom(temp_path, item.system, filename);
+
+    LOGF("[ROM] Install complete: ux0:roms/{}/{}", item.system, filename);
+}
+
 void Downloader::do_download(const DownloadItem& item)
 {
     if (item.type == CompPackBase || item.type == CompPackPatch)
         do_download_comppack(item);
+    else if (item.type == RomGame)
+        do_download_rom(item);
     else
         do_download_package(item);
 }

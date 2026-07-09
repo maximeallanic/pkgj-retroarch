@@ -17,26 +17,22 @@ typedef struct Config
     DbSortOrder order;
     uint32_t filter;
     int no_version_check;
-    std::string install_psp_psx_location;
+    std::string install_psp_psx_location; // kept for compatibility
 
-    std::string games_url;
-    std::string dlcs_url;
-    std::string demos_url;
-    std::string themes_url;
-    std::string psm_games_url;
-    std::string psx_games_url;
-    std::string psp_games_url;
-    std::string psp_dlcs_url;
+    // Archive.org collection search URLs per RetroArch system
+    std::string gb_url;       // Game Boy
+    std::string gbc_url;      // Game Boy Color
+    std::string gba_url;      // Game Boy Advance
+    std::string snes_url;     // Super Nintendo
+    std::string nes_url;      // Nintendo NES
+    std::string genesis_url;  // Sega Mega Drive/Genesis
+    std::string ps1_url;      // PlayStation 1
+    std::string psp_url;      // PlayStation Portable
 
+    // Compatibility-pack URL (unused for ROMs, kept to avoid build breakage)
     std::string comppack_url;
 
     // Image panel settings
-    // thumbnail_url    : optional base URL for custom images fetched as
-    //                    {thumbnail_url}/{titleid}.jpg.
-    //                    Leave empty to fall back to the default PS Store cover.
-    // thumbnail_folder : local directory where images are stored/cached.
-    //                    Leave empty to use the default: ux0:pkgj/cover
-    // thumbnail_size   : panel size preset — 0=off, 1=small, 2=medium (default), 3=large
     std::string thumbnail_url;
     std::string thumbnail_folder;
     int thumbnail_size{2};

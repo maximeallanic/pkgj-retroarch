@@ -20,13 +20,14 @@ enum Type
     PspDlc,
     CompPackBase,
     CompPackPatch,
+    RomGame,  // RetroArch ROM (Archive.org)
 };
 
 struct DownloadItem
 {
     Type type;
     std::string name;
-    std::string content;
+    std::string content;  // Archive.org identifier (for RomGame)
     std::string url;
     std::vector<uint8_t> rif;
     std::vector<uint8_t> digest;
@@ -34,6 +35,8 @@ struct DownloadItem
     std::string partition;
     // only used by compatibility packs
     std::string version;
+    // only used by RomGame: ux0:roms/<system>/
+    std::string system;
 };
 
 std::string type_to_string(Type type);
@@ -77,4 +80,5 @@ private:
 
     void do_download_package(const DownloadItem& item);
     void do_download_comppack(const DownloadItem& item);
+    void do_download_rom(const DownloadItem& item);
 };
