@@ -181,16 +181,19 @@ int64_t VitaHttp::get_length()
     int res;
     uint64_t content_length;
     res = sceHttpGetResponseContentLength(_http->req, &content_length);
-    if (res < 0)
-        throw HttpError(fmt::format(
-                "sceHttpGetResponseContentLength failed: {:#08x}",
-                static_cast<uint32_t>(res)));
+    // These "errors" are expected for chunked / no-content-length responses
+    // (e.g. Archive.org API). They carry the negative-valued SCE error code,
+    // so they must be checked BEFORE the generic `res < 0` rejection below.
     if (res == (int)SCE_HTTP_ERROR_NO_CONTENT_LENGTH ||
         res == (int)SCE_HTTP_ERROR_CHUNK_ENC)
     {
         LOG("HTTP response has no Content-Length (chunked transfer assumed)");
         return 0;
     }
+    if (res < 0)
+        throw HttpError(fmt::format(
+                "sceHttpGetResponseContentLength failed: {:#08x}",
+                static_cast<uint32_t>(res)));
 
     LOGF("HTTP Content-Length: {} bytes", content_length);
     return content_length;
