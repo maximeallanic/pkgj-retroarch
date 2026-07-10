@@ -385,7 +385,39 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 
     const char* json_end = json + json_len;
 
-    // Write cache file (pipe-delimited: item_id|file_name|size)
+    // Resolve the download host+path. We MUST use the top-level "d1" server plus
+    // the top-level "dir" (the classic ia*.archive.org fleet, GoDaddy RSA certs
+    // the Vita's SSL stack can handle). The generic /download/ URL 302-redirects
+    // to newer dn*.archive.org nodes that serve ECDSA-only TLS, which the Vita
+    // cannot negotiate. alternate_locations also carries a server/dir but for
+    // those dn* nodes — so grab the "dir" that appears at/after "d1", not the
+    // first one in the document.
+    const std::string d1 = json_str(json, json_len, "d1");
+    std::string dir;
+    {
+        const char* d1pat = "\"d1\":\"";
+        const size_t d1len = strlen(d1pat);
+        const char* pos = nullptr;
+        for (size_t i = 0; i + d1len <= json_len; ++i)
+            if (memcmp(json + i, d1pat, d1len) == 0)
+            {
+                pos = json + i;
+                break;
+            }
+        const char* from = pos ? pos : json;
+        dir = json_str(from, json_len - static_cast<size_t>(from - json), "dir");
+    }
+
+    std::string base_url;
+    if (!d1.empty() && !dir.empty())
+        base_url = "https://" + d1 + dir; // dir already begins with '/'
+    else
+        // Fallback (may fail on Vita SSL if it lands on a dn* node).
+        base_url = "https://archive.org/download/" + item_id;
+
+    LOGF("Archive.org download base: {}", base_url);
+
+    // Write cache file (pipe-delimited: file_name|size|download_url)
     const auto filepath =
             fmt::format("{}/{}", _dbPath, pkgi_mode_to_file_name(mode));
     const auto tmppath = _dbPath + "/dbtmp.dat";
@@ -422,8 +454,10 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
             if (!name.empty() && is_rom_file(mode, base_lower) &&
                 !is_excluded_file(base_lower))
             {
-                const std::string line = item_id + "|" + name + "|" +
-                                         (size.empty() ? "0" : size) + "\n";
+                const std::string url = base_url + "/" + url_encode_path(name);
+                const std::string line = name + "|" +
+                                         (size.empty() ? "0" : size) + "|" +
+                                         url + "\n";
                 pkgi_write(
                         item_file, line.data(),
                         static_cast<uint32_t>(line.size()));
@@ -505,21 +539,21 @@ void TitleDatabase::reload(
 
         try
         {
-            // Cache line format: item_id|file_name|size
+            // Cache line format: file_name|size|download_url
             const auto fields = split_pipe(line);
             if (fields.size() < 2)
                 continue;
 
-            const std::string& item_id   = fields[0];
-            const std::string& file_name = fields[1];
+            const std::string& file_name = fields[0];
             int64_t size_val = 0;
-            if (fields.size() > 2 && !fields[2].empty())
+            if (fields.size() > 1 && !fields[1].empty())
             {
-                try { size_val = std::stoll(fields[2]); }
+                try { size_val = std::stoll(fields[1]); }
                 catch (...) { size_val = 0; }
             }
+            const std::string& url = (fields.size() > 2) ? fields[2] : fields[0];
 
-            if (item_id.empty() || file_name.empty())
+            if (file_name.empty() || url.empty())
                 continue;
 
             // Display name: file base name without its extension.
@@ -535,10 +569,6 @@ void TitleDatabase::reload(
                 !pkgi_stricontains(title.c_str(), search.c_str()) &&
                 !pkgi_stricontains(file_name.c_str(), search.c_str()))
                 continue;
-
-            // Archive.org direct download URL for this individual ROM file.
-            const std::string url = "https://archive.org/download/" + item_id +
-                                    "/" + url_encode_path(file_name);
 
             // Unique key within the system list (used for temp path + presence).
             const std::string content = basename_of(file_name);
