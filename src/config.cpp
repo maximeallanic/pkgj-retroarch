@@ -19,9 +19,9 @@
 // curated for exposing one file per game (not a single combined archive).
 // Override any of them from ux0:pkgj/config.txt with e.g.:  url_snes <item_id>
 //
-// GB / PSP have no good per-file item on Archive.org at the moment, so they are
-// left empty (refresh disabled) until a suitable item identifier is configured.
-static const char default_gb_url[] = "";
+// PSP has no good per-file item on Archive.org at the moment, so it is left
+// empty (refresh disabled) until a suitable item identifier is configured.
+static const char default_gb_url[] = "theentiregameboycollection";
 
 static const char default_gbc_url[] =
     "httpsarchive.orgdetailsnintendo-gameboy-color-full-rom-archive";
