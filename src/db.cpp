@@ -109,39 +109,6 @@ static std::string json_str(const char* data, size_t len, const char* key)
     return std::string(found, end);
 }
 
-// Return the value of a numeric field "key":<number> within [data, data+len)
-static int64_t json_num(const char* data, size_t len, const char* key)
-{
-    std::string pat = "\"";
-    pat += key;
-    pat += "\":";
-
-    const char* found = nullptr;
-    for (size_t i = 0; i + pat.size() <= len; ++i)
-    {
-        if (memcmp(data + i, pat.c_str(), pat.size()) == 0)
-        {
-            found = data + i + pat.size();
-            break;
-        }
-    }
-    if (!found)
-        return 0;
-
-    // skip whitespace
-    while (*found == ' ' || *found == '\t') found++;
-    if (*found < '0' || *found > '9')
-        return 0;
-
-    int64_t result = 0;
-    while (*found >= '0' && *found <= '9')
-    {
-        result = result * 10 + (*found - '0');
-        found++;
-    }
-    return result;
-}
-
 // Find the closing '}' matching an opening '{' at ptr[0].
 // Returns pointer to the '}', or nullptr on error.
 static const char* find_object_end(const char* ptr, const char* limit)
@@ -199,6 +166,121 @@ static std::vector<std::string> split_pipe(const std::string& s, char delim = '|
     return parts;
 }
 
+static bool ends_with(const std::string& s, const char* suffix)
+{
+    const size_t n = strlen(suffix);
+    return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
+}
+
+// Is this basename (lowercased) a ROM playable for the given system?
+// Zipped/7z ROMs are loadable by RetroArch cores for every cartridge system.
+static bool is_rom_file(Mode mode, const std::string& base_lower)
+{
+    if (ends_with(base_lower, ".zip") || ends_with(base_lower, ".7z"))
+        return true;
+    switch (mode)
+    {
+    case ModeGB:  return ends_with(base_lower, ".gb");
+    case ModeGBC: return ends_with(base_lower, ".gbc") ||
+                         ends_with(base_lower, ".gb");
+    case ModeGBA: return ends_with(base_lower, ".gba");
+    case ModeSNES: return ends_with(base_lower, ".sfc") ||
+                          ends_with(base_lower, ".smc");
+    case ModeNES: return ends_with(base_lower, ".nes");
+    case ModeGenesis: return ends_with(base_lower, ".md") ||
+                             ends_with(base_lower, ".gen") ||
+                             ends_with(base_lower, ".smd") ||
+                             ends_with(base_lower, ".bin");
+    case ModePS1: return ends_with(base_lower, ".chd") ||
+                         ends_with(base_lower, ".pbp") ||
+                         ends_with(base_lower, ".cue") ||
+                         ends_with(base_lower, ".iso") ||
+                         ends_with(base_lower, ".img");
+    case ModePSP: return ends_with(base_lower, ".iso") ||
+                         ends_with(base_lower, ".cso") ||
+                         ends_with(base_lower, ".pbp");
+    }
+    return false;
+}
+
+// Files to skip: the single combined archive some items ship alongside the
+// individual games, plus Archive.org bookkeeping files.
+static bool is_excluded_file(const std::string& base_lower)
+{
+    if (base_lower.find("rom collection") != std::string::npos ||
+        base_lower.find("full_rom_pack") != std::string::npos ||
+        base_lower.find("romset") != std::string::npos)
+        return true;
+    return ends_with(base_lower, "collection.zip") ||
+           ends_with(base_lower, "_meta.xml") ||
+           ends_with(base_lower, "_files.xml") ||
+           ends_with(base_lower, "_reviews.xml") ||
+           ends_with(base_lower, ".torrent") ||
+           ends_with(base_lower, ".sqlite") ||
+           ends_with(base_lower, ".xml");
+}
+
+static std::string to_lower(std::string s)
+{
+    for (char& c : s)
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+    return s;
+}
+
+static std::string basename_of(const std::string& path)
+{
+    const auto pos = path.rfind('/');
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+// Minimal JSON string unescape for the escapes Archive.org actually emits.
+static std::string json_unescape(const std::string& s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        if (s[i] == '\\' && i + 1 < s.size())
+        {
+            const char n = s[i + 1];
+            if (n == '/' || n == '\\' || n == '"')
+            {
+                out += n;
+                ++i;
+                continue;
+            }
+        }
+        out += s[i];
+    }
+    return out;
+}
+
+// Percent-encode a path for use in an Archive.org download URL. '/' separators
+// are preserved; unreserved characters pass through; everything else is escaped.
+static std::string url_encode_path(const std::string& path)
+{
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(path.size() * 2);
+    for (unsigned char c : path)
+    {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+            c == '~' || c == '/')
+        {
+            out += static_cast<char>(c);
+        }
+        else
+        {
+            out += '%';
+            out += hex[c >> 4];
+            out += hex[c & 0x0F];
+        }
+    }
+    return out;
+}
+
 // Sorting helper
 bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
 {
@@ -226,17 +308,38 @@ bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
 } // namespace
 
 // ---------------------------------------------------------------------------
-// update() — Download Archive.org search results and cache locally
-// URL format: https://archive.org/advancedsearch.php?q=collection:...&output=json&...
+// update() — Fetch an Archive.org item's metadata and cache its ROM file list
+//
+// update_url is an Archive.org *item identifier* (the first one if a
+// comma-separated list is given). We GET https://archive.org/metadata/<id>
+// and walk its "files" array, keeping the entries whose extension matches the
+// system. Each ROM file becomes one cache line:  item_id|file_name|size
 // ---------------------------------------------------------------------------
 void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 {
     db_total = 0;
     db_size = 0;
 
-    LOGF("Fetching ROM list from Archive.org: {}", update_url);
+    // Take the first item identifier if several are configured.
+    std::string item_id = update_url;
+    const auto comma = item_id.find(',');
+    if (comma != std::string::npos)
+        item_id = item_id.substr(0, comma);
+    // Trim surrounding whitespace.
+    while (!item_id.empty() && (item_id.front() == ' ' || item_id.front() == '\t'))
+        item_id.erase(item_id.begin());
+    while (!item_id.empty() && (item_id.back() == ' ' || item_id.back() == '\t' ||
+                                item_id.back() == '\r' || item_id.back() == '\n'))
+        item_id.pop_back();
 
-    http->start(update_url, 0);
+    if (item_id.empty())
+        throw std::runtime_error(
+                "no Archive.org item configured for this system");
+
+    const std::string meta_url = "https://archive.org/metadata/" + item_id;
+    LOGF("Fetching ROM metadata from Archive.org: {}", meta_url);
+
+    http->start(meta_url, 0);
 
     const auto http_length = http->get_length();
     db_total = (http_length > 0) ? static_cast<uint32_t>(http_length) : 0;
@@ -265,24 +368,24 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
     const char* json = json_buf.data();
     const size_t json_len = json_buf.size() - 1;
 
-    // Locate the "docs":[ array
-    const char* docs_key = "\"docs\":[";
-    const char* docs_start = nullptr;
-    for (size_t i = 0; i + strlen(docs_key) <= json_len; ++i)
+    // Locate the "files":[ array
+    const char* files_key = "\"files\":[";
+    const char* files_start = nullptr;
+    for (size_t i = 0; i + strlen(files_key) <= json_len; ++i)
     {
-        if (memcmp(json + i, docs_key, strlen(docs_key)) == 0)
+        if (memcmp(json + i, files_key, strlen(files_key)) == 0)
         {
-            docs_start = json + i + strlen(docs_key);
+            files_start = json + i + strlen(files_key);
             break;
         }
     }
 
-    if (!docs_start)
-        throw std::runtime_error("Archive.org JSON missing 'docs' array");
+    if (!files_start)
+        throw std::runtime_error("Archive.org metadata missing 'files' array");
 
     const char* json_end = json + json_len;
 
-    // Write cache file (pipe-delimited: identifier|title|date|size)
+    // Write cache file (pipe-delimited: item_id|file_name|size)
     const auto filepath =
             fmt::format("{}/{}", _dbPath, pkgi_mode_to_file_name(mode));
     const auto tmppath = _dbPath + "/dbtmp.dat";
@@ -299,7 +402,7 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
     };
 
     uint32_t count = 0;
-    const char* p = docs_start;
+    const char* p = files_start;
     while (p < json_end && *p != ']')
     {
         if (*p == '{')
@@ -310,18 +413,20 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 
             const size_t obj_len = static_cast<size_t>(obj_end - p + 1);
 
-            const std::string identifier = json_str(p, obj_len, "identifier");
-            const std::string title      = json_str(p, obj_len, "title");
-            const std::string addeddate  = json_str(p, obj_len, "addeddate");
-            const int64_t     item_size  = json_num(p, obj_len, "item_size");
+            const std::string name = json_unescape(json_str(p, obj_len, "name"));
+            // "size" is a JSON string in item metadata, e.g. "size":"552536"
+            const std::string size = json_str(p, obj_len, "size");
 
-            if (!identifier.empty())
+            const std::string base_lower = to_lower(basename_of(name));
+
+            if (!name.empty() && is_rom_file(mode, base_lower) &&
+                !is_excluded_file(base_lower))
             {
-                const std::string line = identifier + "|" +
-                                         title      + "|" +
-                                         addeddate  + "|" +
-                                         std::to_string(item_size) + "\n";
-                pkgi_write(item_file, line.data(), static_cast<uint32_t>(line.size()));
+                const std::string line = item_id + "|" + name + "|" +
+                                         (size.empty() ? "0" : size) + "\n";
+                pkgi_write(
+                        item_file, line.data(),
+                        static_cast<uint32_t>(line.size()));
                 count++;
             }
 
@@ -341,7 +446,7 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 
     pkgi_rename(tmppath, filepath);
 
-    LOGF("Archive.org database cached: {} items → {}", count, filepath);
+    LOGF("Archive.org database cached: {} ROMs → {}", count, filepath);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,52 +505,60 @@ void TitleDatabase::reload(
 
         try
         {
+            // Cache line format: item_id|file_name|size
             const auto fields = split_pipe(line);
             if (fields.size() < 2)
                 continue;
 
-            const std::string& identifier = fields[0];
-            const std::string& title      = fields[1];
-            const std::string  date  = (fields.size() > 2) ? fields[2] : "";
+            const std::string& item_id   = fields[0];
+            const std::string& file_name = fields[1];
             int64_t size_val = 0;
-            if (fields.size() > 3 && !fields[3].empty())
+            if (fields.size() > 2 && !fields[2].empty())
             {
-                try { size_val = std::stoll(fields[3]); }
+                try { size_val = std::stoll(fields[2]); }
                 catch (...) { size_val = 0; }
             }
 
-            if (identifier.empty())
+            if (item_id.empty() || file_name.empty())
                 continue;
+
+            // Display name: file base name without its extension.
+            std::string title = basename_of(file_name);
+            const auto dot = title.rfind('.');
+            if (dot != std::string::npos && dot != 0)
+                title = title.substr(0, dot);
 
             ++_title_count;
 
             // Apply search filter
             if (!search.empty() &&
                 !pkgi_stricontains(title.c_str(), search.c_str()) &&
-                !pkgi_stricontains(identifier.c_str(), search.c_str()))
+                !pkgi_stricontains(file_name.c_str(), search.c_str()))
                 continue;
 
-            // Construct Archive.org direct download URL
-            // Pattern: https://archive.org/download/<id>/<id>.zip
-            const std::string url = "https://archive.org/download/" +
-                                    identifier + "/" + identifier + ".zip";
+            // Archive.org direct download URL for this individual ROM file.
+            const std::string url = "https://archive.org/download/" + item_id +
+                                    "/" + url_encode_path(file_name);
+
+            // Unique key within the system list (used for temp path + presence).
+            const std::string content = basename_of(file_name);
 
             if (db.size() >= MAX_DB_ITEMS)
                 break;
 
             db.push_back(DbItem{
                     /*presence=*/PresenceUnknown,
-                    /*titleid=*/identifier,
-                    /*content=*/identifier,
+                    /*titleid=*/content,
+                    /*content=*/content,
                     /*flags=*/0,
-                    /*name=*/title.empty() ? identifier : title,
+                    /*name=*/title.empty() ? content : title,
                     /*name_org=*/"",
                     /*zrif=*/"",
                     /*url=*/url,
                     /*has_digest=*/false,
                     /*digest=*/{},
                     /*size=*/size_val,
-                    /*date=*/date,
+                    /*date=*/"",
                     /*app_version=*/"",
                     /*fw_version=*/"",
                     /*selected=*/false,

@@ -13,61 +13,32 @@
 // Format: advancedsearch.php returns JSON with response.docs[]
 // fl[]: fields to return per item (identifier, title, addeddate, item_size)
 
-static const char default_gb_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3AGameBoy"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+// Each system points at one (or more, comma-separated) Archive.org *item*
+// identifier(s). update() fetches https://archive.org/metadata/<id> and lists
+// the individual ROM files found in that item's "files" array. These items were
+// curated for exposing one file per game (not a single combined archive).
+// Override any of them from ux0:pkgj/config.txt with e.g.:  url_snes <item_id>
+//
+// GB / PSP have no good per-file item on Archive.org at the moment, so they are
+// left empty (refresh disabled) until a suitable item identifier is configured.
+static const char default_gb_url[] = "";
 
 static const char default_gbc_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3AGameBoyColor"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+    "httpsarchive.orgdetailsnintendo-gameboy-color-full-rom-archive";
 
 static const char default_gba_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3AGameBoyAdvance"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+    "2DisneyGamesDisneySportsFootballDisneySportsSkateboardingEuropeEnFrDeEsIt";
 
-static const char default_snes_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3ASuper-Nintendo-Entertainment-System-SNESemu"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+static const char default_snes_url[] = "FinalFantasyIII";
 
-static const char default_nes_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3ANintendo-Entertainment-System-NES"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+static const char default_nes_url[] = "FullNes";
 
 static const char default_genesis_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3ASega-Mega-Drive---Genesis-ROMs"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+    "cylums-sega-genesis-big-rom-collection-10-08-2025";
 
-static const char default_ps1_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3ANo-Intro_Sony_PlayStation"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+static const char default_ps1_url[] = "cylums-playstation-rom-collection";
 
-static const char default_psp_url[] =
-    "https://archive.org/advancedsearch.php"
-    "?q=collection%3ANo-Intro_Sony_PlayStation_Portable"
-    "&output=json&rows=500"
-    "&fl[]=identifier&fl[]=title&fl[]=addeddate&fl[]=item_size"
-    "&sort[]=title+asc";
+static const char default_psp_url[] = "";
 
 // Comppack URL is unused for ROM mode but kept to avoid build errors
 static constexpr char default_comppack_url[] = {0};

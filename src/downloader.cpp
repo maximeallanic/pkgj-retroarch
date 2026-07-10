@@ -247,11 +247,9 @@ void Downloader::do_download_rom(const DownloadItem& item)
     ScopeProcessLock _;
     LOGF("[ROM] Download started: {} (system: {})", item.name, item.system);
 
-    // Derive filename from URL (last path component)
-    std::string filename = item.content + ".zip";
-    const auto slash_pos = item.url.rfind('/');
-    if (slash_pos != std::string::npos && slash_pos + 1 < item.url.size())
-        filename = item.url.substr(slash_pos + 1);
+    // item.content is the ROM's real file name (with extension); the URL carries
+    // the percent-encoded form used for the HTTP request.
+    const std::string filename = item.content;
 
     // Temp path during download
     const std::string temp_path =

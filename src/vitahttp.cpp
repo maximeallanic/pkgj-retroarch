@@ -75,6 +75,10 @@ void VitaHttp::start(const std::string& url, uint64_t offset)
     };
     // sceHttpSetRecvTimeOut(tmpl, 10 * 1000 * 1000);
 
+    // Follow 3xx redirects automatically — Archive.org's /download/ URLs
+    // 302-redirect to a CDN node, and /metadata may redirect too.
+    sceHttpSetAutoRedirect(tmpl, SCE_TRUE);
+
     if ((conn = sceHttpCreateConnectionWithURL(tmpl, url.c_str(), SCE_FALSE)) <
         0)
         throw HttpError(fmt::format(
