@@ -3,6 +3,7 @@ find_package(SQLite3 REQUIRED)
 add_executable(pkgj_cli
   src/annotationdb.cpp
   src/comppackdb.cpp
+  src/config_url.cpp
   src/db.cpp
   src/systems.cpp
   src/jsonscan.cpp
@@ -54,6 +55,7 @@ if(BUILD_SIM)
     src/annotationdb.cpp
     src/comppackdb.cpp
     src/config.cpp
+    src/config_url.cpp
     src/configeditor.cpp
     src/customhandler.cpp
     src/db.cpp

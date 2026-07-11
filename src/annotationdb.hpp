@@ -2,7 +2,6 @@
 
 #include "sqlite.hpp"
 
-#include <fmt/format.h>
 #include <string>
 
 // Symbols shown in the title list next to a flagged item.

@@ -6,9 +6,11 @@ add_executable(pkgj_tests
   test_systems.cpp
   test_jsonscan.cpp
   test_romcache.cpp
+  test_config_url.cpp
   ${CMAKE_SOURCE_DIR}/src/systems.cpp
   ${CMAKE_SOURCE_DIR}/src/jsonscan.cpp
   ${CMAKE_SOURCE_DIR}/src/romcache.cpp
+  ${CMAKE_SOURCE_DIR}/src/config_url.cpp
 )
 target_include_directories(pkgj_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}

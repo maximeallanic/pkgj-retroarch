@@ -56,6 +56,7 @@ add_executable(pkgj
   src/configeditor.cpp
   src/comppackdb.cpp
   src/config.cpp
+  src/config_url.cpp
   src/db.cpp
   src/systems.cpp
   src/jsonscan.cpp

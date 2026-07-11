@@ -8,37 +8,17 @@
 
 #include "file.hpp"
 #include "pkgi.hpp"
+#include "systems.hpp"
 
-// Default Archive.org collection search URLs (overridable in config.txt)
-// Format: advancedsearch.php returns JSON with response.docs[]
-// fl[]: fields to return per item (identifier, title, addeddate, item_size)
-
-// Each system points at one (or more, comma-separated) Archive.org *item*
-// identifier(s). update() fetches https://archive.org/metadata/<id> and lists
-// the individual ROM files found in that item's "files" array. These items were
-// curated for exposing one file per game (not a single combined archive).
-// Override any of them from ux0:pkgj/config.txt with e.g.:  url_snes <item_id>
+// Default Archive.org item identifiers per system now live in the
+// data-driven table in systems.cpp (SystemDef::default_item). update()
+// fetches https://archive.org/metadata/<id> and lists the individual ROM
+// files found in that item's "files" array. Override any of them from
+// ux0:pkgj/config.txt with e.g.:  url_snes <item_id>
 //
-// PSP has no good per-file item on Archive.org at the moment, so it is left
-// empty (refresh disabled) until a suitable item identifier is configured.
-static const char default_gb_url[] = "theentiregameboycollection";
-
-static const char default_gbc_url[] =
-    "httpsarchive.orgdetailsnintendo-gameboy-color-full-rom-archive";
-
-static const char default_gba_url[] =
-    "2DisneyGamesDisneySportsFootballDisneySportsSkateboardingEuropeEnFrDeEsIt";
-
-static const char default_snes_url[] = "FinalFantasyIII";
-
-static const char default_nes_url[] = "FullNes";
-
-static const char default_genesis_url[] =
-    "cylums-sega-genesis-big-rom-collection-10-08-2025";
-
-static const char default_ps1_url[] = "cylums-playstation-rom-collection";
-
-static const char default_psp_url[] = "";
+// PSP has no good per-file item on Archive.org at the moment, so its
+// default_item is left empty (refresh disabled) until a suitable item
+// identifier is configured.
 
 // Comppack URL is unused for ROM mode but kept to avoid build errors
 static constexpr char default_comppack_url[] = {0};
@@ -186,15 +166,8 @@ Config pkgi_load_config()
         Config config{};
         config.no_version_check = 0;
 
-        // Default Archive.org URLs
-        config.gb_url      = default_gb_url;
-        config.gbc_url     = default_gbc_url;
-        config.gba_url     = default_gba_url;
-        config.snes_url    = default_snes_url;
-        config.nes_url     = default_nes_url;
-        config.genesis_url = default_genesis_url;
-        config.ps1_url     = default_ps1_url;
-        config.psp_url     = default_psp_url;
+        // system_urls starts empty; pkgi_config_url() falls back to each
+        // system's table default_item when no explicit override is set.
         config.comppack_url = "";
         config.thumbnail_url = "";
         config.thumbnail_folder = "";
@@ -254,23 +227,24 @@ Config pkgi_load_config()
 
             text = skipws(text, end);
 
-            // RetroArch system URL keys
-            if (pkgi_stricmp(key, "url_gb") == 0)
-                config.gb_url = value;
-            else if (pkgi_stricmp(key, "url_gbc") == 0)
-                config.gbc_url = value;
-            else if (pkgi_stricmp(key, "url_gba") == 0)
-                config.gba_url = value;
-            else if (pkgi_stricmp(key, "url_snes") == 0)
-                config.snes_url = value;
-            else if (pkgi_stricmp(key, "url_nes") == 0)
-                config.nes_url = value;
-            else if (pkgi_stricmp(key, "url_genesis") == 0)
-                config.genesis_url = value;
-            else if (pkgi_stricmp(key, "url_ps1") == 0)
-                config.ps1_url = value;
-            else if (pkgi_stricmp(key, "url_psp") == 0)
-                config.psp_url = value;
+            // RetroArch system URL keys (table-driven; keeps legacy
+            // url_gb / url_gbc / ... keys working since they are exactly
+            // each SystemDef's config_key).
+            bool handled_system_url = false;
+            for (const auto& sys : pkgi_systems())
+            {
+                if (pkgi_stricmp(key, sys.config_key.c_str()) == 0)
+                {
+                    config.system_urls[sys.id] = value;
+                    handled_system_url = true;
+                    break;
+                }
+            }
+
+            if (handled_system_url)
+            {
+                // handled above
+            }
             else if (pkgi_stricmp(key, "url_comppack") == 0)
                 config.comppack_url = value;
             else if (pkgi_stricmp(key, "thumbnail_url") == 0)
@@ -327,19 +301,17 @@ void pkgi_save_config(const Config& config)
 {
     char data[4096];
     int len = 0;
-#define SAVE_URL(key, field, def)                             \
-    if (!config.field.empty() && config.field != def)        \
-        len += pkgi_snprintf(data + len, sizeof(data) - len, \
-                             key " %s\n", config.field.c_str());
-    SAVE_URL("url_gb",      gb_url,      default_gb_url)
-    SAVE_URL("url_gbc",     gbc_url,     default_gbc_url)
-    SAVE_URL("url_gba",     gba_url,     default_gba_url)
-    SAVE_URL("url_snes",    snes_url,    default_snes_url)
-    SAVE_URL("url_nes",     nes_url,     default_nes_url)
-    SAVE_URL("url_genesis", genesis_url, default_genesis_url)
-    SAVE_URL("url_ps1",     ps1_url,     default_ps1_url)
-    SAVE_URL("url_psp",     psp_url,     default_psp_url)
-#undef SAVE_URL
+
+    for (const auto& sys : pkgi_systems())
+    {
+        auto it = config.system_urls.find(sys.id);
+        if (it == config.system_urls.end() || it->second.empty())
+            continue;
+        if (it->second == sys.default_item)
+            continue;  // don't persist a value identical to the default
+        len += pkgi_snprintf(data + len, sizeof(data) - len,
+                             "%s %s\n", sys.config_key.c_str(), it->second.c_str());
+    }
 
     for (size_t i = 0; i < config.custom_entries.size(); i++)
     {
