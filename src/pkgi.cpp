@@ -120,10 +120,9 @@ const char* pkgi_get_cancel_str(void)
     return pkgi_cancel_button() == PKGI_BUTTON_O ? PKGI_UTF8_O : PKGI_UTF8_X;
 }
 
-Type mode_to_type(Mode /*mode*/)
+Type mode_to_type(Mode mode)
 {
-    // All modes are RetroArch ROM systems — use RomGame download type
-    return RomGame;
+    return pkgi_system(mode).source == SourceKind::NpsVita ? Game : RomGame;
 }
 
 BgdlType mode_to_bgdl_type(Mode /*mode*/)
@@ -1240,6 +1239,33 @@ void pkgi_start_download(
 
     try
     {
+        if (item.system.empty() && !item.zrif.empty() &&
+            mode_to_type(mode) == Game)
+        {
+            uint8_t rif[PKGI_PSM_RIF_SIZE];
+            char message[256];
+            if (!pkgi_zrif_decode(item.zrif.c_str(), rif, message, sizeof(message)))
+                throw std::runtime_error(
+                        fmt::format("invalid zRIF for {}: {}", item.name, message));
+
+            downloader.add(DownloadItem{
+                    Game,
+                    item.name,
+                    item.content,                 // content_id
+                    item.url,                     // .pkg url
+                    std::vector<uint8_t>(rif, rif + PKGI_RIF_SIZE),
+                    item.has_digest
+                            ? std::vector<uint8_t>(item.digest.begin(),
+                                                   item.digest.end())
+                            : std::vector<uint8_t>{},
+                    false,                        // save_as_iso
+                    pkgi_get_mode_partition(),    // "ux0:"
+                    "",                           // version
+                    "",                           // system (unused)
+            });
+            return;
+        }
+
         // All modes are RetroArch ROM modes — add directly to downloader queue.
         // No bgdl, no zrif/rif decode, no PSN-specific logic.
         downloader.add(DownloadItem{
