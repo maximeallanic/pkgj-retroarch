@@ -66,7 +66,10 @@ TEST_CASE("table integrity: unique ids, cache files, config keys; non-empty dirs
     std::set<std::string> ids, caches, keys;
     for (const auto& s : pkgi_systems())
     {
-        CHECK_FALSE(s.roms_dir.empty());
+        // psvita installs natively via PKG promote, not ux0:roms/<system>/, so
+        // it has no roms_dir.
+        if (s.id != "psvita")
+            CHECK_FALSE(s.roms_dir.empty());
         CHECK(ids.insert(s.id).second);
         CHECK(caches.insert(s.cache_file).second);
         CHECK(keys.insert(s.config_key).second);
@@ -105,4 +108,23 @@ TEST_CASE("wonderswan color and ngp color extensions are accepted")
 {
     CHECK(pkgi_matches_extension(*pkgi_system_by_id("wonderswan"), "game.wsc"));
     CHECK(pkgi_matches_extension(*pkgi_system_by_id("ngp"), "game.ngc"));
+}
+
+TEST_CASE("all cartridge/disc systems use the Archive.org source")
+{
+    for (const auto& s : pkgi_systems())
+        if (s.id != "psvita")
+            CHECK(s.source == SourceKind::ArchiveOrgRom);
+}
+
+TEST_CASE("the psvita row is a NoPayStation native-install source")
+{
+    const SystemDef* v = pkgi_system_by_id("psvita");
+    REQUIRE(v != nullptr);
+    CHECK(v->source == SourceKind::NpsVita);
+    CHECK(v->install == InstallVitaNative);
+    CHECK(v->cache_file == "nps_psvita.dat");
+    CHECK(v->config_key == "url_psvita");
+    CHECK(v->default_item == "http://nopaystation.com/tsv/PSV_GAMES.tsv");
+    CHECK(v->display_name == "PS Vita Games");
 }

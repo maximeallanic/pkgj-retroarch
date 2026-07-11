@@ -10,6 +10,12 @@ enum InstallKind
     InstallVitaNative,     // reserved — Phase 3
 };
 
+enum class SourceKind
+{
+    ArchiveOrgRom,  // fetch = archive.org/metadata JSON; install = copy to ux0:roms/
+    NpsVita,        // fetch = NoPayStation TSV; install = PKG promote (Type::Game)
+};
+
 struct SystemDef
 {
     std::string id;            // stable key, e.g. "gb", "snes"
@@ -20,6 +26,7 @@ struct SystemDef
     InstallKind install;
     std::string default_item;  // default Archive.org identifier ("" if none)
     std::string config_key;    // "url_gb"
+    SourceKind source;
 };
 
 // The system table. Index order == UI order == Mode value.
