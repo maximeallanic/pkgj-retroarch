@@ -5,6 +5,7 @@ add_executable(pkgj_cli
   src/comppackdb.cpp
   src/db.cpp
   src/systems.cpp
+  src/jsonscan.cpp
   src/download.cpp
   src/extractzip.cpp
   src/filedownload.cpp
@@ -56,6 +57,7 @@ if(BUILD_SIM)
     src/customhandler.cpp
     src/db.cpp
   src/systems.cpp
+  src/jsonscan.cpp
     src/dialog.cpp
     src/download.cpp
     src/downloader.cpp

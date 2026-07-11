@@ -1,6 +1,7 @@
 #include "db.hpp"
 
 #include "file.hpp"
+#include "jsonscan.hpp"
 #include "pkgi.hpp"
 #include "systems.hpp"
 #include "utils.hpp"
@@ -45,73 +46,6 @@ static const char* pkgi_mode_to_file_name(Mode mode)
 namespace
 {
 
-// Return the value of a string field "key":"<value>" within [data, data+len)
-static std::string json_str(const char* data, size_t len, const char* key)
-{
-    // Build the search pattern "key":"
-    std::string pat = "\"";
-    pat += key;
-    pat += "\":\"";
-
-    const char* found = nullptr;
-    for (size_t i = 0; i + pat.size() <= len; ++i)
-    {
-        if (memcmp(data + i, pat.c_str(), pat.size()) == 0)
-        {
-            found = data + i + pat.size();
-            break;
-        }
-    }
-    if (!found)
-        return "";
-
-    const char* end = found;
-    const char* limit = data + len;
-    while (end < limit && *end != '"' && *end != '\0')
-    {
-        if (*end == '\\')
-            end++; // skip escaped char
-        end++;
-    }
-    return std::string(found, end);
-}
-
-// Find the closing '}' matching an opening '{' at ptr[0].
-// Returns pointer to the '}', or nullptr on error.
-static const char* find_object_end(const char* ptr, const char* limit)
-{
-    if (!ptr || *ptr != '{')
-        return nullptr;
-    int depth = 0;
-    bool in_string = false;
-    while (ptr < limit)
-    {
-        char c = *ptr;
-        if (in_string)
-        {
-            if (c == '\\')
-                ptr++; // skip escaped char
-            else if (c == '"')
-                in_string = false;
-        }
-        else
-        {
-            if (c == '"')
-                in_string = true;
-            else if (c == '{')
-                depth++;
-            else if (c == '}')
-            {
-                depth--;
-                if (depth == 0)
-                    return ptr;
-            }
-        }
-        ptr++;
-    }
-    return nullptr;
-}
-
 // Split a string by delimiter (returns at most maxParts parts)
 static std::vector<std::string> split_pipe(const std::string& s, char delim = '|')
 {
@@ -145,53 +79,6 @@ static std::string basename_of(const std::string& path)
 {
     const auto pos = path.rfind('/');
     return pos == std::string::npos ? path : path.substr(pos + 1);
-}
-
-// Minimal JSON string unescape for the escapes Archive.org actually emits.
-static std::string json_unescape(const std::string& s)
-{
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size(); ++i)
-    {
-        if (s[i] == '\\' && i + 1 < s.size())
-        {
-            const char n = s[i + 1];
-            if (n == '/' || n == '\\' || n == '"')
-            {
-                out += n;
-                ++i;
-                continue;
-            }
-        }
-        out += s[i];
-    }
-    return out;
-}
-
-// Percent-encode a path for use in an Archive.org download URL. '/' separators
-// are preserved; unreserved characters pass through; everything else is escaped.
-static std::string url_encode_path(const std::string& path)
-{
-    static const char* hex = "0123456789ABCDEF";
-    std::string out;
-    out.reserve(path.size() * 2);
-    for (unsigned char c : path)
-    {
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
-            c == '~' || c == '/')
-        {
-            out += static_cast<char>(c);
-        }
-        else
-        {
-            out += '%';
-            out += hex[c >> 4];
-            out += hex[c & 0x0F];
-        }
-    }
-    return out;
 }
 
 // Sorting helper
@@ -305,7 +192,7 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
     // cannot negotiate. alternate_locations also carries a server/dir but for
     // those dn* nodes — so grab the "dir" that appears at/after "d1", not the
     // first one in the document.
-    const std::string d1 = json_str(json, json_len, "d1");
+    const std::string d1 = pkgi_json_str(json, json_len, "d1");
     std::string dir;
     {
         const char* d1pat = "\"d1\":\"";
@@ -318,7 +205,7 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
                 break;
             }
         const char* from = pos ? pos : json;
-        dir = json_str(from, json_len - static_cast<size_t>(from - json), "dir");
+        dir = pkgi_json_str(from, json_len - static_cast<size_t>(from - json), "dir");
     }
 
     std::string base_url;
@@ -352,22 +239,22 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
     {
         if (*p == '{')
         {
-            const char* obj_end = find_object_end(p, json_end);
+            const char* obj_end = pkgi_find_object_end(p, json_end);
             if (!obj_end)
                 break;
 
             const size_t obj_len = static_cast<size_t>(obj_end - p + 1);
 
-            const std::string name = json_unescape(json_str(p, obj_len, "name"));
+            const std::string name = pkgi_json_unescape(pkgi_json_str(p, obj_len, "name"));
             // "size" is a JSON string in item metadata, e.g. "size":"552536"
-            const std::string size = json_str(p, obj_len, "size");
+            const std::string size = pkgi_json_str(p, obj_len, "size");
 
             const std::string base_lower = to_lower(basename_of(name));
 
             if (!name.empty() && pkgi_matches_extension(pkgi_system(mode), base_lower) &&
                 !pkgi_is_excluded_file(base_lower))
             {
-                const std::string url = base_url + "/" + url_encode_path(name);
+                const std::string url = base_url + "/" + pkgi_url_encode_path(name);
                 const std::string line = name + "|" +
                                          (size.empty() ? "0" : size) + "|" +
                                          url + "\n";

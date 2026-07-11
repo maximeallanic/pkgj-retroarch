@@ -58,6 +58,7 @@ add_executable(pkgj
   src/config.cpp
   src/db.cpp
   src/systems.cpp
+  src/jsonscan.cpp
   src/customhandler.cpp
   src/dialog.cpp
   src/download.cpp

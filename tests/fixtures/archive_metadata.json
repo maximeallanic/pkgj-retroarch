@@ -1,0 +1,14 @@
+{
+  "created":1700000000,
+  "d1":"ia600505.us.archive.org",
+  "d2":"ia800505.us.archive.org",
+  "dir":"/12/items/theentiregameboycollection",
+  "files":[
+    {"name":"Tetris (World).gb","source":"original","size":"131072"},
+    {"name":"Super Mario Land (World).gb","source":"original","size":"65536"},
+    {"name":"theentiregameboycollection_meta.xml","source":"metadata","size":"512"},
+    {"name":"Game Boy Collection.zip","source":"original","size":"999999"}
+  ],
+  "server":"ia600505.us.archive.org",
+  "uniq":123456
+}
