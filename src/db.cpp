@@ -2,6 +2,7 @@
 
 #include "file.hpp"
 #include "jsonscan.hpp"
+#include "npstsv.hpp"
 #include "pkgi.hpp"
 #include "romcache.hpp"
 #include "systems.hpp"
@@ -85,6 +86,18 @@ bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
     return cmp < 0;
 }
 
+static bool region_matches(uint32_t filter, GameRegion r)
+{
+    switch (r)
+    {
+    case RegionUSA: return filter & DbFilterRegionUSA;
+    case RegionEUR: return filter & DbFilterRegionEUR;
+    case RegionJPN: return filter & DbFilterRegionJPN;
+    case RegionASA: return filter & DbFilterRegionASA;
+    default:        return true;
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -95,10 +108,58 @@ bool lower(const DbItem& a, const DbItem& b, DbSort sort, DbSortOrder order)
 // and walk its "files" array, keeping the entries whose extension matches the
 // system. Each ROM file becomes one cache line:  item_id|file_name|size
 // ---------------------------------------------------------------------------
+void TitleDatabase::update_nps_tsv(
+        Mode mode, Http* http, const std::string& update_url)
+{
+    if (update_url.empty())
+        throw std::runtime_error("no NoPayStation TSV configured for this system");
+
+    LOGF("Fetching NoPayStation TSV: {}", update_url);
+    http->start(update_url, 0);
+
+    const auto http_length = http->get_length();
+    db_total = (http_length > 0) ? static_cast<uint32_t>(http_length) : 0;
+
+    const auto filepath =
+            fmt::format("{}/{}", _dbPath, pkgi_mode_to_file_name(mode));
+    const auto tmppath = _dbPath + "/dbtmp.dat";
+
+    auto item_file = pkgi_create(tmppath);
+    if (!item_file)
+        throw formatEx<std::runtime_error>(
+                "cannot create cache file {}", tmppath);
+    BOOST_SCOPE_EXIT_ALL(&)
+    {
+        if (item_file)
+            pkgi_close(item_file);
+    };
+
+    std::vector<uint8_t> chunk(64 * 1024);
+    for (;;)
+    {
+        const int read = http->read(chunk.data(), chunk.size());
+        if (read <= 0)
+            break;
+        db_size += static_cast<uint32_t>(read);
+        pkgi_write(item_file, chunk.data(), static_cast<uint32_t>(read));
+    }
+
+    pkgi_close(item_file);
+    item_file = nullptr;
+    pkgi_rename(tmppath, filepath);
+    LOGF("NoPayStation TSV cached → {}", filepath);
+}
+
 void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 {
     db_total = 0;
     db_size = 0;
+
+    if (pkgi_system(mode).source == SourceKind::NpsVita)
+    {
+        update_nps_tsv(mode, http, update_url);
+        return;
+    }
 
     // Take the first item identifier if several are configured.
     std::string item_id = update_url;
@@ -267,13 +328,93 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 // ---------------------------------------------------------------------------
 // reload() — Read cached pipe-delimited file and populate db
 // ---------------------------------------------------------------------------
+void TitleDatabase::reload_nps_tsv(
+        Mode mode,
+        uint32_t region_filter,
+        const std::string& search,
+        const std::set<std::string>& installed_games,
+        const std::string& data)
+{
+    const bool filter_by_region =
+            (region_filter & DbFilterAllRegions) != DbFilterAllRegions;
+
+    std::vector<std::string> lines;
+    {
+        std::string cur;
+        for (char c : data)
+        {
+            if (c == '\n')
+            {
+                if (!cur.empty() && cur.back() == '\r')
+                    cur.pop_back();
+                lines.push_back(cur);
+                cur.clear();
+            }
+            else
+                cur += c;
+        }
+        if (!cur.empty())
+            lines.push_back(cur);
+    }
+
+    for (size_t i = 1; i < lines.size(); ++i)   // i = 1 skips the header
+    {
+        NpsRow row;
+        if (!pkgi_parse_nps_game_row(lines[i], row))
+            continue;
+
+        ++_title_count;
+
+        if (filter_by_region)
+        {
+            const GameRegion gr = pkgi_get_region(row.titleid);
+            if (!region_matches(region_filter, gr))
+                continue;
+        }
+
+        if (!search.empty() &&
+            !pkgi_stricontains(row.name.c_str(), search.c_str()) &&
+            !pkgi_stricontains(row.titleid.c_str(), search.c_str()))
+            continue;
+
+        if ((region_filter & DbFilterInstalled) &&
+            installed_games.find(row.titleid) == installed_games.end())
+            continue;
+
+        if (db.size() >= MAX_DB_ITEMS)
+            break;
+
+        db.push_back(DbItem{
+                PresenceUnknown,
+                row.titleid,
+                row.content_id,
+                0,
+                row.name,
+                row.name_org,
+                row.zrif,
+                row.pkg_url,
+                false,
+                {},
+                row.size,
+                "",
+                "",
+                "",
+                false,
+                "",              // system (unused for Vita)
+                "",
+                UserFlag::None,
+                "",
+        });
+    }
+}
+
 void TitleDatabase::reload(
         Mode mode,
-        uint32_t /*region_filter*/,
+        uint32_t region_filter,
         DbSort sort_by,
         DbSortOrder sort_order,
         const std::string& search,
-        const std::set<std::string>& /*installed_games*/)
+        const std::set<std::string>& installed_games)
 {
     db.clear();
     _title_count = 0;
@@ -288,94 +429,104 @@ void TitleDatabase::reload(
     if (db_data.empty())
         return;
 
-    const std::string sys_dir = pkgi_mode_to_system_dir(mode);
-
-    auto ptr = reinterpret_cast<char*>(db_data.data());
-    const auto data_end = reinterpret_cast<char*>(db_data.data() + db_data.size());
-
-    unsigned line_num = 0;
-    while (ptr < data_end)
+    if (pkgi_system(mode).source == SourceKind::NpsVita)
     {
-        ++line_num;
+        const std::string data(
+                reinterpret_cast<const char*>(db_data.data()),
+                db_data.size());
+        reload_nps_tsv(mode, region_filter, search, installed_games, data);
+    }
+    else
+    {
+        const std::string sys_dir = pkgi_mode_to_system_dir(mode);
 
-        // Find end of line
-        char* line_end = ptr;
-        while (line_end < data_end && *line_end != '\n' && *line_end != '\r')
-            line_end++;
+        auto ptr = reinterpret_cast<char*>(db_data.data());
+        const auto data_end = reinterpret_cast<char*>(db_data.data() + db_data.size());
 
-        if (line_end == ptr)
+        unsigned line_num = 0;
+        while (ptr < data_end)
         {
-            // skip empty line
+            ++line_num;
+
+            // Find end of line
+            char* line_end = ptr;
+            while (line_end < data_end && *line_end != '\n' && *line_end != '\r')
+                line_end++;
+
+            if (line_end == ptr)
+            {
+                // skip empty line
+                while (ptr < data_end && (*ptr == '\n' || *ptr == '\r'))
+                    ptr++;
+                continue;
+            }
+
+            std::string line(ptr, line_end);
+
+            // advance past newline(s)
+            ptr = line_end;
             while (ptr < data_end && (*ptr == '\n' || *ptr == '\r'))
                 ptr++;
-            continue;
-        }
 
-        std::string line(ptr, line_end);
+            try
+            {
+                // Cache line format: file_name|size|download_url
+                RomCacheLine parsed;
+                if (!pkgi_parse_cache_line(line, parsed))
+                    continue;
+                const std::string& file_name = parsed.name;
+                const int64_t size_val = parsed.size;
+                const std::string& url = parsed.url;
 
-        // advance past newline(s)
-        ptr = line_end;
-        while (ptr < data_end && (*ptr == '\n' || *ptr == '\r'))
-            ptr++;
+                if (file_name.empty() || url.empty())
+                    continue;
 
-        try
-        {
-            // Cache line format: file_name|size|download_url
-            RomCacheLine parsed;
-            if (!pkgi_parse_cache_line(line, parsed))
-                continue;
-            const std::string& file_name = parsed.name;
-            const int64_t size_val = parsed.size;
-            const std::string& url = parsed.url;
+                // Display name: file base name without its extension.
+                std::string title = basename_of(file_name);
+                const auto dot = title.rfind('.');
+                if (dot != std::string::npos && dot != 0)
+                    title = title.substr(0, dot);
 
-            if (file_name.empty() || url.empty())
-                continue;
+                ++_title_count;
 
-            // Display name: file base name without its extension.
-            std::string title = basename_of(file_name);
-            const auto dot = title.rfind('.');
-            if (dot != std::string::npos && dot != 0)
-                title = title.substr(0, dot);
+                // Apply search filter
+                if (!search.empty() &&
+                    !pkgi_stricontains(title.c_str(), search.c_str()) &&
+                    !pkgi_stricontains(file_name.c_str(), search.c_str()))
+                    continue;
 
-            ++_title_count;
+                // Unique key within the system list (used for temp path + presence).
+                const std::string content = basename_of(file_name);
 
-            // Apply search filter
-            if (!search.empty() &&
-                !pkgi_stricontains(title.c_str(), search.c_str()) &&
-                !pkgi_stricontains(file_name.c_str(), search.c_str()))
-                continue;
+                if (db.size() >= MAX_DB_ITEMS)
+                    break;
 
-            // Unique key within the system list (used for temp path + presence).
-            const std::string content = basename_of(file_name);
-
-            if (db.size() >= MAX_DB_ITEMS)
-                break;
-
-            db.push_back(DbItem{
-                    /*presence=*/PresenceUnknown,
-                    /*titleid=*/content,
-                    /*content=*/content,
-                    /*flags=*/0,
-                    /*name=*/title.empty() ? content : title,
-                    /*name_org=*/"",
-                    /*zrif=*/"",
-                    /*url=*/url,
-                    /*has_digest=*/false,
-                    /*digest=*/{},
-                    /*size=*/size_val,
-                    /*date=*/"",
-                    /*app_version=*/"",
-                    /*fw_version=*/"",
-                    /*selected=*/false,
-                    /*system=*/sys_dir,
-                    /*description=*/"",
-                    /*user_flag=*/UserFlag::None,
-                    /*user_comment=*/"",
-            });
-        }
-        catch (const std::exception& e)
-        {
-            LOGFW("Failed to parse line {}: {}", line_num, e.what());
+                db.push_back(DbItem{
+                        /*presence=*/PresenceUnknown,
+                        /*titleid=*/content,
+                        /*content=*/content,
+                        /*flags=*/0,
+                        /*name=*/title.empty() ? content : title,
+                        /*name_org=*/"",
+                        /*zrif=*/"",
+                        /*url=*/url,
+                        /*has_digest=*/false,
+                        /*digest=*/{},
+                        /*size=*/size_val,
+                        /*date=*/"",
+                        /*app_version=*/"",
+                        /*fw_version=*/"",
+                        /*selected=*/false,
+                        /*system=*/sys_dir,
+                        /*description=*/"",
+                        /*user_flag=*/UserFlag::None,
+                        /*user_comment=*/"",
+                });
+            }
+            catch (const std::exception& e)
+            {
+                LOGFW("Failed to parse line {}: {}", line_num, e.what());
+            }
         }
     }
 

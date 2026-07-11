@@ -124,6 +124,14 @@ public:
 private:
     static constexpr auto MAX_DB_ITEMS = 8192;
 
+    void update_nps_tsv(Mode mode, Http* http, const std::string& update_url);
+    void reload_nps_tsv(
+            Mode mode,
+            uint32_t region_filter,
+            const std::string& search,
+            const std::set<std::string>& installed_games,
+            const std::string& data);
+
     std::string _dbPath;
     uint32_t db_total;
     uint32_t db_size;
