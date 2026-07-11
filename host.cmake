@@ -113,3 +113,8 @@ if(BUILD_SIM)
 
   message(STATUS "pkgj_sim: graphical simulator target enabled")
 endif()
+
+option(BUILD_TESTS "Build pkgj_tests unit tests" OFF)
+if(BUILD_TESTS)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/tests ${CMAKE_BINARY_DIR}/tests)
+endif()
