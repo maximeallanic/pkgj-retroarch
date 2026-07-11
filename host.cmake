@@ -8,6 +8,7 @@ add_executable(pkgj_cli
   src/systems.cpp
   src/jsonscan.cpp
   src/romcache.cpp
+  src/npstsv.cpp
   src/download.cpp
   src/extractzip.cpp
   src/filedownload.cpp
@@ -62,6 +63,7 @@ if(BUILD_SIM)
   src/systems.cpp
   src/jsonscan.cpp
   src/romcache.cpp
+  src/npstsv.cpp
     src/dialog.cpp
     src/download.cpp
     src/downloader.cpp
