@@ -72,3 +72,37 @@ TEST_CASE("table integrity: unique ids, cache files, config keys; non-empty dirs
         CHECK(keys.insert(s.config_key).second);
     }
 }
+
+TEST_CASE("new consoles are present and match their formats")
+{
+    CHECK(pkgi_mode_count() >= 20);
+
+    struct Case { const char* id; const char* good; const char* bad; };
+    const Case cases[] = {
+        {"mastersystem", "sonic.sms",  "sonic.nes"},
+        {"gamegear",     "sonic.gg",   "sonic.sms"},
+        {"pcengine",     "bonk.pce",   "bonk.gb"},
+        {"ngp",          "smt.ngp",    "smt.gb"},
+        {"wonderswan",   "gunpey.ws",  "gunpey.gb"},
+        {"atari2600",    "combat.a26", "combat.gb"},
+        {"atari7800",    "dig.a78",    "dig.gb"},
+        {"lynx",         "shadow.lnx", "shadow.gb"},
+        {"msx",          "aleste.rom", "aleste.gb"},
+        {"colecovision", "venture.col","venture.gb"},
+        {"virtualboy",   "wario.vb",   "wario.gb"},
+    };
+    for (const auto& c : cases)
+    {
+        const SystemDef* s = pkgi_system_by_id(c.id);
+        REQUIRE_MESSAGE(s != nullptr, c.id);
+        CHECK(pkgi_matches_extension(*s, c.good));
+        CHECK_FALSE(pkgi_matches_extension(*s, c.bad));
+        CHECK(pkgi_matches_extension(*s, "anything.zip"));  // archives universal
+    }
+}
+
+TEST_CASE("wonderswan color and ngp color extensions are accepted")
+{
+    CHECK(pkgi_matches_extension(*pkgi_system_by_id("wonderswan"), "game.wsc"));
+    CHECK(pkgi_matches_extension(*pkgi_system_by_id("ngp"), "game.ngc"));
+}
