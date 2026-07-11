@@ -3,6 +3,7 @@
 #include "file.hpp"
 #include "jsonscan.hpp"
 #include "pkgi.hpp"
+#include "romcache.hpp"
 #include "systems.hpp"
 #include "utils.hpp"
 
@@ -45,27 +46,6 @@ static const char* pkgi_mode_to_file_name(Mode mode)
 // ---------------------------------------------------------------------------
 namespace
 {
-
-// Split a string by delimiter (returns at most maxParts parts)
-static std::vector<std::string> split_pipe(const std::string& s, char delim = '|')
-{
-    std::vector<std::string> parts;
-    std::string cur;
-    for (char c : s)
-    {
-        if (c == delim)
-        {
-            parts.push_back(cur);
-            cur.clear();
-        }
-        else
-        {
-            cur += c;
-        }
-    }
-    parts.push_back(cur);
-    return parts;
-}
 
 static std::string to_lower(std::string s)
 {
@@ -208,14 +188,7 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
         dir = pkgi_json_str(from, json_len - static_cast<size_t>(from - json), "dir");
     }
 
-    std::string base_url;
-    if (!d1.empty() && !dir.empty())
-        base_url = "https://" + d1 + dir; // dir already begins with '/'
-    else
-        // Fallback (may fail on Vita SSL if it lands on a dn* node).
-        base_url = "https://archive.org/download/" + item_id;
-
-    LOGF("Archive.org download base: {}", base_url);
+    LOGF("Archive.org download base: {}{}", d1, dir);
 
     // Write cache file (pipe-delimited: file_name|size|download_url)
     const auto filepath =
@@ -254,10 +227,18 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
             if (!name.empty() && pkgi_matches_extension(pkgi_system(mode), base_lower) &&
                 !pkgi_is_excluded_file(base_lower))
             {
-                const std::string url = base_url + "/" + pkgi_url_encode_path(name);
-                const std::string line = name + "|" +
-                                         (size.empty() ? "0" : size) + "|" +
-                                         url + "\n";
+                const std::string enc = pkgi_url_encode_path(name);
+                std::string url;
+                if (!d1.empty() && !dir.empty())
+                    url = pkgi_build_download_url(d1, dir, enc);
+                else
+                    // Fallback (may fail on Vita SSL if it lands on a dn* node).
+                    url = "https://archive.org/download/" + item_id + "/" + enc;
+
+                const long long sz = size.empty() ? 0 : [&]{
+                    try { return std::stoll(size); } catch (...) { return 0LL; }
+                }();
+                const std::string line = pkgi_format_cache_line(name, sz, url) + "\n";
                 pkgi_write(
                         item_file, line.data(),
                         static_cast<uint32_t>(line.size()));
@@ -340,18 +321,12 @@ void TitleDatabase::reload(
         try
         {
             // Cache line format: file_name|size|download_url
-            const auto fields = split_pipe(line);
-            if (fields.size() < 2)
+            RomCacheLine parsed;
+            if (!pkgi_parse_cache_line(line, parsed))
                 continue;
-
-            const std::string& file_name = fields[0];
-            int64_t size_val = 0;
-            if (fields.size() > 1 && !fields[1].empty())
-            {
-                try { size_val = std::stoll(fields[1]); }
-                catch (...) { size_val = 0; }
-            }
-            const std::string& url = (fields.size() > 2) ? fields[2] : fields[0];
+            const std::string& file_name = parsed.name;
+            const int64_t size_val = parsed.size;
+            const std::string& url = parsed.url;
 
             if (file_name.empty() || url.empty())
                 continue;

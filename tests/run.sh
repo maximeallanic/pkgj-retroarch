@@ -9,6 +9,8 @@ CXX="${CXX:-g++-12}"
     tests/test_smoke.cpp \
     tests/test_systems.cpp \
     tests/test_jsonscan.cpp \
+    tests/test_romcache.cpp \
     src/systems.cpp \
-    src/jsonscan.cpp
+    src/jsonscan.cpp \
+    src/romcache.cpp
 /tmp/pkgj_tests "$@"
