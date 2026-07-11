@@ -2,6 +2,7 @@
 
 #include "file.hpp"
 #include "pkgi.hpp"
+#include "systems.hpp"
 #include "utils.hpp"
 
 #include <fmt/format.h>
@@ -18,35 +19,13 @@
 
 std::string pkgi_mode_to_string(Mode mode)
 {
-    switch (mode)
-    {
-    case ModeGB:      return "Game Boy";
-    case ModeGBC:     return "Game Boy Color";
-    case ModeGBA:     return "Game Boy Advance";
-    case ModeSNES:    return "Super Nintendo";
-    case ModeNES:     return "Nintendo NES";
-    case ModeGenesis: return "Sega Mega Drive";
-    case ModePS1:     return "PlayStation 1";
-    case ModePSP:     return "PSP";
-    }
-    return "unknown system";
+    return pkgi_system(mode).display_name;
 }
 
 // Directory name used under ux0:roms/
 std::string pkgi_mode_to_system_dir(Mode mode)
 {
-    switch (mode)
-    {
-    case ModeGB:      return "gb";
-    case ModeGBC:     return "gbc";
-    case ModeGBA:     return "gba";
-    case ModeSNES:    return "snes";
-    case ModeNES:     return "nes";
-    case ModeGenesis: return "megadrive";
-    case ModePS1:     return "psx";
-    case ModePSP:     return "psp";
-    }
-    return "roms";
+    return pkgi_system(mode).roms_dir;
 }
 
 TitleDatabase::TitleDatabase(const std::string& dbPath) : _dbPath(dbPath)
@@ -56,19 +35,7 @@ TitleDatabase::TitleDatabase(const std::string& dbPath) : _dbPath(dbPath)
 // Cache filename per system (pipe-delimited text)
 static const char* pkgi_mode_to_file_name(Mode mode)
 {
-    switch (mode)
-    {
-    case ModeGB:      return "roms_gb.dat";
-    case ModeGBC:     return "roms_gbc.dat";
-    case ModeGBA:     return "roms_gba.dat";
-    case ModeSNES:    return "roms_snes.dat";
-    case ModeNES:     return "roms_nes.dat";
-    case ModeGenesis: return "roms_genesis.dat";
-    case ModePS1:     return "roms_ps1.dat";
-    case ModePSP:     return "roms_psp.dat";
-    }
-    throw formatEx<std::runtime_error>(
-            "unknown mode {}", static_cast<int>(mode));
+    return pkgi_system(mode).cache_file.c_str();
 }
 
 // ---------------------------------------------------------------------------
@@ -164,60 +131,6 @@ static std::vector<std::string> split_pipe(const std::string& s, char delim = '|
     }
     parts.push_back(cur);
     return parts;
-}
-
-static bool ends_with(const std::string& s, const char* suffix)
-{
-    const size_t n = strlen(suffix);
-    return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
-}
-
-// Is this basename (lowercased) a ROM playable for the given system?
-// Zipped/7z ROMs are loadable by RetroArch cores for every cartridge system.
-static bool is_rom_file(Mode mode, const std::string& base_lower)
-{
-    if (ends_with(base_lower, ".zip") || ends_with(base_lower, ".7z"))
-        return true;
-    switch (mode)
-    {
-    case ModeGB:  return ends_with(base_lower, ".gb");
-    case ModeGBC: return ends_with(base_lower, ".gbc") ||
-                         ends_with(base_lower, ".gb");
-    case ModeGBA: return ends_with(base_lower, ".gba");
-    case ModeSNES: return ends_with(base_lower, ".sfc") ||
-                          ends_with(base_lower, ".smc");
-    case ModeNES: return ends_with(base_lower, ".nes");
-    case ModeGenesis: return ends_with(base_lower, ".md") ||
-                             ends_with(base_lower, ".gen") ||
-                             ends_with(base_lower, ".smd") ||
-                             ends_with(base_lower, ".bin");
-    case ModePS1: return ends_with(base_lower, ".chd") ||
-                         ends_with(base_lower, ".pbp") ||
-                         ends_with(base_lower, ".cue") ||
-                         ends_with(base_lower, ".iso") ||
-                         ends_with(base_lower, ".img");
-    case ModePSP: return ends_with(base_lower, ".iso") ||
-                         ends_with(base_lower, ".cso") ||
-                         ends_with(base_lower, ".pbp");
-    }
-    return false;
-}
-
-// Files to skip: the single combined archive some items ship alongside the
-// individual games, plus Archive.org bookkeeping files.
-static bool is_excluded_file(const std::string& base_lower)
-{
-    if (base_lower.find("rom collection") != std::string::npos ||
-        base_lower.find("full_rom_pack") != std::string::npos ||
-        base_lower.find("romset") != std::string::npos)
-        return true;
-    return ends_with(base_lower, "collection.zip") ||
-           ends_with(base_lower, "_meta.xml") ||
-           ends_with(base_lower, "_files.xml") ||
-           ends_with(base_lower, "_reviews.xml") ||
-           ends_with(base_lower, ".torrent") ||
-           ends_with(base_lower, ".sqlite") ||
-           ends_with(base_lower, ".xml");
 }
 
 static std::string to_lower(std::string s)
@@ -451,8 +364,8 @@ void TitleDatabase::update(Mode mode, Http* http, const std::string& update_url)
 
             const std::string base_lower = to_lower(basename_of(name));
 
-            if (!name.empty() && is_rom_file(mode, base_lower) &&
-                !is_excluded_file(base_lower))
+            if (!name.empty() && pkgi_matches_extension(pkgi_system(mode), base_lower) &&
+                !pkgi_is_excluded_file(base_lower))
             {
                 const std::string url = base_url + "/" + url_encode_path(name);
                 const std::string line = name + "|" +

@@ -2,6 +2,7 @@
 
 #include "annotationdb.hpp"
 #include "http.hpp"
+#include "systems.hpp"
 
 #include <array>
 #include <memory>
@@ -89,20 +90,12 @@ enum GameRegion
     RegionUnknown,
 };
 
-// RetroArch ROM systems (replaces PSN modes)
+// Mode is an index into pkgi_systems() (see systems.hpp).
 enum Mode
 {
-    ModeGB,       // Game Boy
-    ModeGBC,      // Game Boy Color
-    ModeGBA,      // Game Boy Advance
-    ModeSNES,     // Super Nintendo / SNES
-    ModeNES,      // Nintendo Entertainment System
-    ModeGenesis,  // Sega Mega Drive / Genesis
-    ModePS1,      // PlayStation 1
-    ModePSP,      // PlayStation Portable
+    ModeGB = 0, ModeGBC, ModeGBA, ModeSNES,
+    ModeNES, ModeGenesis, ModePS1, ModePSP,
 };
-
-static constexpr auto ModeCount = 8;
 
 std::string pkgi_mode_to_string(Mode mode);
 std::string pkgi_mode_to_system_dir(Mode mode);

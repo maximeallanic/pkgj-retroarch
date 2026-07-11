@@ -57,6 +57,7 @@ add_executable(pkgj
   src/comppackdb.cpp
   src/config.cpp
   src/db.cpp
+  src/systems.cpp
   src/customhandler.cpp
   src/dialog.cpp
   src/download.cpp

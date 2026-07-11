@@ -4,6 +4,7 @@ add_executable(pkgj_cli
   src/annotationdb.cpp
   src/comppackdb.cpp
   src/db.cpp
+  src/systems.cpp
   src/download.cpp
   src/extractzip.cpp
   src/filedownload.cpp
@@ -54,6 +55,7 @@ if(BUILD_SIM)
     src/configeditor.cpp
     src/customhandler.cpp
     src/db.cpp
+  src/systems.cpp
     src/dialog.cpp
     src/download.cpp
     src/downloader.cpp
