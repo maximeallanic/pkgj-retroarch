@@ -157,19 +157,11 @@ void configure_db(TitleDatabase* db, const char* search, const Config* config)
 
 std::string const& pkgi_get_url_from_mode(Mode mode)
 {
-    switch (mode)
-    {
-    case ModeGB:      return config.gb_url;
-    case ModeGBC:     return config.gbc_url;
-    case ModeGBA:     return config.gba_url;
-    case ModeSNES:    return config.snes_url;
-    case ModeNES:     return config.nes_url;
-    case ModeGenesis: return config.genesis_url;
-    case ModePS1:     return config.ps1_url;
-    case ModePSP:     return config.psp_url;
-    }
-    throw std::runtime_error(
-            fmt::format("unknown mode: {}", static_cast<int>(mode)));
+    // Resolve against config overrides + table defaults. Static storage so we
+    // can keep returning a reference (callers expect `std::string const&`).
+    static thread_local std::string resolved;
+    resolved = pkgi_config_url(config, mode);
+    return resolved;
 }
 
 static const int PKGI_GROUP_COUNT = 29;
@@ -331,10 +323,10 @@ void pkgi_refresh_thread(void)
     LOG("Checking for app updates");
     try
     {
-        const auto mode_count = ModeCount;
+        const auto mode_count = pkgi_mode_count();
 
         ScopeProcessLock lock;
-        for (int i = 0; i < ModeCount; ++i)
+        for (int i = 0; i < pkgi_mode_count(); ++i)
         {
             const auto mode = static_cast<Mode>(i);
             auto const url = pkgi_get_url_from_mode(mode);
@@ -875,14 +867,10 @@ void pkgi_do_main(Downloader& downloader, pkgi_input* input)
         input->pressed &= ~PKGI_BUTTON_T;
 
         config_temp = config;
-        int allow_refresh = !config.gb_url.empty()      << 0 |
-                            !config.gbc_url.empty()     << 1 |
-                            !config.gba_url.empty()     << 2 |
-                            !config.snes_url.empty()    << 3 |
-                            !config.nes_url.empty()     << 4 |
-                            !config.genesis_url.empty() << 5 |
-                            !config.ps1_url.empty()     << 6 |
-                            !config.psp_url.empty()     << 7;
+        int allow_refresh = 0;
+        for (int i = 0; i < pkgi_mode_count() && i < 32; ++i)
+            if (!pkgi_get_url_from_mode(static_cast<Mode>(i)).empty())
+                allow_refresh |= (1 << i);
         pkgi_menu_start(search_active, &config, allow_refresh);
     }
 }

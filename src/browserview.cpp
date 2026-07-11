@@ -39,16 +39,10 @@ extern "C"
 static std::vector<BrowseNode> build_tree(const Config& config)
 {
     // RetroArch ROM systems — Archive.org sources
-    auto root = std::vector<BrowseNode>{
-        { "Game Boy",          ModeGB,      {}, "", "" },
-        { "Game Boy Color",    ModeGBC,     {}, "", "" },
-        { "Game Boy Advance",  ModeGBA,     {}, "", "" },
-        { "Super Nintendo",    ModeSNES,    {}, "", "" },
-        { "Nintendo NES",      ModeNES,     {}, "", "" },
-        { "Sega Mega Drive",   ModeGenesis, {}, "", "" },
-        { "PlayStation 1",     ModePS1,     {}, "", "" },
-        { "PSP",               ModePSP,     {}, "", "" },
-    };
+    std::vector<BrowseNode> root;
+    for (int i = 0; i < pkgi_mode_count(); ++i)
+        root.push_back({ pkgi_system(i).display_name,
+                         static_cast<Mode>(i), {}, "", "" });
 
     int custom_number = 1;
     for (const auto& entry : config.custom_entries)
